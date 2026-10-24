@@ -15,7 +15,13 @@
   <p>In construction</p>
 </header>
 
+<nav class="view-tabs" aria-label="Sections">
+  <button type="button" class="tab" data-view="collection-view" aria-pressed="true">Boosters &amp; collection</button>
+  <button type="button" class="tab" data-view="play-view" aria-pressed="false">Play</button>
+</nav>
+
 <main>
+ <div id="collection-view">
   <section aria-labelledby="summon-title">
     <h2 id="summon-title" style="text-align:center">Open a booster</h2>
     <p style="text-align:center;color:var(--muted)">
@@ -38,6 +44,59 @@
     <h2 id="collection-title">My collection</h2>
     <p id="summary" style="color:var(--muted)"></p>
     <div id="collection" class="grid"></div>
+  </section>
+ </div>
+
+  <section id="play-view" aria-labelledby="play-title" hidden>
+    <h2 id="play-title" style="text-align:center">Play</h2>
+    <p class="play-intro">
+      A deck is shuffled from the cards you own. Play one card per turn, then draw.
+      Each card has a <strong>cost</strong> paid in <strong>work force</strong>: permanent
+      work force on its board refreshes every turn, single-use work force in your hand is
+      consumed when spent. You may also place one permanent work force card per turn.
+      Stack a card on another that <strong>shares a type or subtype</strong> with a
+      <strong>strictly lower degree</strong>. <strong>Item</strong> cards change a board card's
+      <strong>robustness</strong>: permanent items attach to it, single-use items can only
+      be used to destroy it. A card whose robustness drops to 0 or below is destroyed, along
+      with every card stacked on it. Items can likewise lower or raise the <strong>budget</strong>
+      of permanent work force cards, destroying them at 0 or below.
+      Your score is the total reach on the board.
+    </p>
+
+    <div class="controls">
+      <button id="new-game" type="button">New game</button>
+      <button id="pass-turn" type="button" class="secondary" disabled>Pass (draw)</button>
+      <button id="end-game" type="button" class="secondary" disabled>End game</button>
+    </div>
+
+    <div class="game-hud" aria-live="polite">
+      <div><span>Score</span><strong id="hud-score">0</strong></div>
+      <div><span>Best</span><strong id="hud-best">0</strong></div>
+      <div><span>Turn</span><strong id="hud-turn">0</strong></div>
+      <div><span>Deck</span><strong id="hud-deck">0</strong></div>
+      <div><span>Work force</span><strong id="hud-wf">0</strong></div>
+      <div><span>In hand</span><strong id="hud-wf-hand">+0</strong></div>
+    </div>
+
+    <p id="game-status" role="status" aria-live="polite"></p>
+
+    <div id="selection-bar" class="selection-bar" hidden>
+      <span id="selection-text"></span>
+      <div class="selection-buttons">
+        <button type="button" id="sel-inspect" class="secondary">Inspect</button>
+        <button type="button" id="sel-discard" class="secondary">Discard</button>
+        <button type="button" id="sel-cancel" class="secondary">Cancel</button>
+      </div>
+    </div>
+
+    <h3 class="zone-title">Work force <small id="wf-summary"></small></h3>
+    <div id="wf-board" class="wf-board"></div>
+
+    <h3 class="zone-title">Board</h3>
+    <div id="board" class="board"></div>
+
+    <h3 class="zone-title">Your hand</h3>
+    <div id="hand" class="hand"></div>
   </section>
 </main>
 
@@ -69,6 +128,7 @@
     <div class="modal-info">
       <p id="modal-rarity" class="rarity"></p>
       <h2 id="modal-title"></h2>
+      <p id="modal-stats" class="modal-stats"></p>
       <p id="modal-description" class="modal-description"></p>
       <p id="modal-count" class="modal-count"></p>
     </div>
@@ -78,6 +138,7 @@
 <footer>Your collection is saved locally in this browser.</footer>
 
 <script type="module" src="script.js"></script>
+<script type="module" src="game.js"></script>
 
 </body>
 </html>
