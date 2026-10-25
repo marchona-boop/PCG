@@ -17,6 +17,7 @@
 
 <nav class="view-tabs" aria-label="Sections">
   <button type="button" class="tab" data-view="collection-view" aria-pressed="true">Boosters &amp; collection</button>
+  <button type="button" class="tab" data-view="deck-view" aria-pressed="false">Deck</button>
   <button type="button" class="tab" data-view="play-view" aria-pressed="false">Play</button>
 </nav>
 
@@ -47,9 +48,31 @@
   </section>
  </div>
 
+  <section id="deck-view" aria-labelledby="deck-title" hidden>
+    <h2 id="deck-title" class="visually-hidden">Deck</h2>
+    <div class="deck-header">
+      <div class="deck-size-box"><span>Deck</span><strong id="deck-size">0 / 20</strong></div>
+      <div class="deck-info">
+        <p id="deck-validity"></p>
+        <p id="deck-composition" class="deck-composition"></p>
+      </div>
+      <div class="deck-actions">
+        <button id="deck-autofill" type="button" class="secondary">Fill randomly</button>
+        <button id="deck-clear" type="button" class="secondary">Clear</button>
+        <button id="deck-play" type="button">Play with this deck</button>
+      </div>
+    </div>
+    <p id="deck-message" class="deck-message" role="status" aria-live="polite"></p>
+    <p class="deck-help">Use <strong>+</strong> / <strong>−</strong> to choose how many copies of each card go
+      into your deck (up to the number you own). Click a picture to inspect the card.</p>
+    <div id="deck-cards"></div>
+  </section>
+
   <section id="play-view" aria-labelledby="play-title" hidden>
-    <h2 id="play-title" style="text-align:center">Play</h2>
-    <p class="play-intro">
+    <h2 id="play-title" class="visually-hidden">Play</h2>
+    <details class="rules-panel">
+      <summary>Rules</summary>
+      <p class="play-intro">
       A deck is shuffled from the cards you own. Play one card per turn, then draw.
       Each card has a <strong>cost</strong> paid in <strong>work force</strong>: permanent
       work force on its board refreshes every turn, single-use work force in your hand is
@@ -66,8 +89,9 @@
       Your score is the total reach on the board. Online, players alternate turns for
       10 rounds; items can also target your opponent's cards.
     </p>
+    </details>
 
-    <details class="versus-panel" id="versus-panel" open>
+    <details class="versus-panel" id="versus-panel">
       <summary>Play against someone online</summary>
       <div class="versus-row">
         <label>Your name <input id="player-name" type="text" maxlength="24" placeholder="e.g. Marie"></label>
@@ -87,11 +111,11 @@
       <p id="net-status" class="net-status" role="status" aria-live="polite"></p>
     </details>
 
-    <div class="controls">
+    <div class="controls game-controls">
       <button id="new-game" type="button">New game</button>
-      <button id="pass-turn" type="button" class="secondary" disabled>Pass (draw)</button>
       <button id="end-game" type="button" class="secondary" disabled>End game</button>
     </div>
+    <p class="deck-line"><span id="deck-line-text"></span> · <a href="#deck" id="deck-edit-link">edit deck</a></p>
 
     <div class="game-hud" aria-live="polite">
       <div><span>Score</span><strong id="hud-score">0</strong></div>
@@ -104,32 +128,34 @@
       <div><span>In hand</span><strong id="hud-wf-hand">+0</strong></div>
     </div>
 
-    <p id="turn-banner" class="turn-banner" hidden></p>
-    <p id="game-status" role="status" aria-live="polite"></p>
-
-    <div id="selection-bar" class="selection-bar" hidden>
-      <span id="selection-text"></span>
-      <div class="selection-buttons">
-        <button type="button" id="sel-inspect" class="secondary">Inspect</button>
-        <button type="button" id="sel-discard" class="secondary">Discard</button>
-        <button type="button" id="sel-cancel" class="secondary">Cancel</button>
-      </div>
-    </div>
-
-    <section id="opponent-zone" class="opponent-zone" hidden aria-label="Opponent">
+    <section id="opponent-zone" class="player-zone opponent-zone" hidden aria-label="Opponent">
       <h3 class="zone-title opp-title"><span id="opp-title">Opponent</span> <small id="opp-summary"></small></h3>
       <div id="opp-wf-board" class="wf-board opp"></div>
       <div id="opp-board" class="board opp"></div>
     </section>
 
-    <h3 class="zone-title"><span id="my-zone-title">Work force</span> <small id="wf-summary"></small></h3>
-    <div id="wf-board" class="wf-board"></div>
+    <section id="my-zone" class="player-zone my-zone" aria-label="Your side">
+      <div id="wf-board" class="wf-board"></div>
+      <div id="board" class="board"></div>
 
-    <h3 class="zone-title" id="my-board-title">Board</h3>
-    <div id="board" class="board"></div>
+      <div class="action-bar">
+        <p id="turn-banner" class="turn-banner" hidden></p>
+        <p id="game-status" role="status" aria-live="polite"></p>
+        <div class="action-row">
+          <div id="selection-bar" class="selection-bar" hidden>
+            <span id="selection-text"></span>
+            <div class="selection-buttons">
+              <button type="button" id="sel-inspect" class="secondary">Inspect</button>
+              <button type="button" id="sel-discard" class="secondary">Discard</button>
+              <button type="button" id="sel-cancel" class="secondary">Cancel</button>
+            </div>
+          </div>
+          <button id="pass-turn" type="button" class="secondary pass-button" disabled>Pass (draw)</button>
+        </div>
+      </div>
 
-    <h3 class="zone-title">Your hand</h3>
-    <div id="hand" class="hand"></div>
+      <div id="hand" class="hand" aria-label="Your hand"></div>
+    </section>
   </section>
 </main>
 
@@ -171,7 +197,8 @@
 <footer>Your collection is saved locally in this browser.</footer>
 
 <script type="module" src="script.js"></script>
-<script type="module" src="game.js?v=2026-10-26-versus"></script>
+<script type="module" src="deck.js?v=2026-10-26-deck"></script>
+<script type="module" src="game.js?v=2026-10-26-deck2"></script>
 
 </body>
 </html>

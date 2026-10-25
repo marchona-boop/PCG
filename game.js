@@ -50,8 +50,9 @@
 //   index.html). Add ?local=1 to the address to test with two tabs instead.
 
 import { cards, typeInfo, collection, openCardInspection } from "./script.js";
+import { deckForGame, deckSummary, renderDeckBuilder } from "./deck.js?v=2026-10-26-deck";
 
-const GAME_VERSION = "2026-10-26-versus";
+const GAME_VERSION = "2026-10-26-deck2";
 
 // ---- Tunable settings -------------------------------------------------------
 const HAND_SIZE = 5;          // cards in hand at the start
@@ -341,11 +342,8 @@ let best = loadBest();
 let uidCounter = 0;
 
 function newGame() {
-  const pool = [];
-  for (const card of cards) {
-    const copies = collection[card.id] || 0;
-    for (let i = 0; i < copies; i++) pool.push(makeInst(card));
-  }
+  const chosen = deckForGame();
+  const pool = chosen.ids.map(id => cardById.get(id)).filter(Boolean).map(card => makeInst(card));
 
   if (!pool.length) {
     game = null;
@@ -355,7 +353,7 @@ function newGame() {
     return;
   }
 
-  const deck = shuffle(pool).slice(0, DECK_SIZE);
+  const deck = pool;
   match = null;
   opp = null;
   game = {
@@ -376,7 +374,8 @@ function newGame() {
   };
   selected = null;
   render();
-  setStatus("Place work force, then pick a card to play.");
+  setStatus((chosen.custom ? "" : "Your deck isn't complete (Deck tab): playing with a random deck from your collection. ") +
+    "Place work force, then pick a card to play.");
   checkStuck();
 }
 
@@ -903,8 +902,6 @@ function renderOpponent() {
   $("hud-round-box").hidden = !match;
   $("hud-opp-box").hidden = !match;
   $("hud-best-box").hidden = !!match;
-  $("my-zone-title").textContent = match ? "Your work force" : "Work force";
-  $("my-board-title").textContent = match ? "Your board" : "Board";
   if (!match || !opp) return;
   renderWorkforceBoard(opp, $("opp-wf-board"), "opp");
   renderBoard(opp, $("opp-board"), "opp");
@@ -943,12 +940,14 @@ function renderWorkforceBoard(st = game, zone = $("wf-board"), side = "me") {
   const selItem = inst && isItem(inst.card) ? inst.card : null;
   const affordable = selItem ? canAfford(selItem) : false;
 
-  if (!st || !st.wfBoard.length) {
-    const empty = document.createElement("p");
-    empty.className = "wf-empty";
-    empty.textContent = placing ? "Place work force here" : "No permanent work force yet";
-    zone.append(empty);
-  } else {
+  // Label in the middle of the bench (the cards cover it as the bench fills up).
+  const label = document.createElement("p");
+  label.className = "wf-empty";
+  label.textContent = placing
+    ? "Place work force here"
+    : side === "opp" ? `${opponentName()}'s work force` : match ? "Your work force" : "Work force";
+  zone.append(label);
+  if (st && st.wfBoard.length) {
     st.wfBoard.forEach((w, index) => {
       const el = makeGameCard(w.card);
       addBoardOverlays(el, w);
@@ -989,12 +988,6 @@ function renderWorkforceBoard(st = game, zone = $("wf-board"), side = "me") {
     zone.removeAttribute("aria-label");
   }
 
-  if (side === "me") {
-    $("wf-summary").textContent = game
-      ? `available this turn ${formatStat(boardWfAvailable())} / ${formatStat(boardWfTotal())}` +
-        ` · single-use in hand +${formatStat(handWfTotal())}`
-      : "";
-  }
 }
 
 function renderBoard(st = game, board = $("board"), side = "me") {
@@ -1052,11 +1045,15 @@ function renderBoard(st = game, board = $("board"), side = "me") {
       const top = stack[stack.length - 1].card;
       const info = document.createElement("p");
       info.className = "stack-info";
-      const t = document.createElement("span");
-      t.textContent = `${typeName(top.type)} · ×${stack.length}`;
+      info.title = `${typeName(top.type)} · ${stack.length} card(s)`;
       const r = document.createElement("strong");
       r.textContent = `Reach ${formatStat(stackReach(stack))}`;
-      info.append(t, r);
+      info.append(r);
+      if (stack.length > 1) {
+        const t = document.createElement("span");
+        t.textContent = ` ×${stack.length}`;
+        info.append(t);
+      }
       slotEl.append(pile, info);
     }
 
@@ -1311,12 +1308,7 @@ function finishMatch(message = "", { send = true } = {}) {
 
 // Build a deck (list of card ids) from your own collection.
 function deckIdsFromCollection() {
-  const pool = [];
-  for (const card of cards) {
-    const copies = collection[card.id] || 0;
-    for (let i = 0; i < copies; i++) pool.push(String(card.id));
-  }
-  return shuffle(pool).slice(0, DECK_SIZE);
+  return deckForGame().ids;
 }
 
 function newPlayerState(side, deckIds) {
@@ -1421,12 +1413,13 @@ function onNetMessage(msg) {
       opp = newPlayerState("b", Array.isArray(msg.deck) ? msg.deck : []);
       selected = null;
       setNet(`Connected to ${opponentName()}.`);
+      $("versus-panel").open = false;
       showView("play-view");
       render();
       setStatus(`Game on! ${VERSUS_ROUNDS} rounds — you start.`);
       sendState("");
     } else if (msg.t === "state") {
-      if (!match) setNet("Connected.");
+      if (!match) { setNet("Connected."); $("versus-panel").open = false; }
       showView("play-view");
       receiveState(msg);
     } else if (msg.t === "bye" && match && !match.over) {
@@ -1610,10 +1603,21 @@ $("new-game").addEventListener("click", () => {
   if (game && !game.over && !confirm("Abandon the current game and start a new one?")) return;
   if (net) leaveGame(false);
   mySide = "s";
+  $("versus-panel").open = false;
   newGame();
 });
 $("end-game").addEventListener("click", () => finishGame());
 $("host-game").addEventListener("click", hostGame);
+$("deck-play").addEventListener("click", () => {
+  history.replaceState(null, "", "#play");
+  showView("play-view");
+  if (!(match && !match.over)) {
+    if (game && !game.over && !confirm("Abandon the current game and start a new one with this deck?")) return;
+    if (net) leaveGame(false);
+    mySide = "s";
+    newGame();
+  }
+});
 $("join-game").addEventListener("click", () => joinGame($("join-code").value));
 $("join-code").addEventListener("keydown", e => { if (e.key === "Enter") joinGame($("join-code").value); });
 $("leave-game").addEventListener("click", () => {
@@ -1645,6 +1649,7 @@ $("player-name").addEventListener("change", () => {
 {
   const code = new URLSearchParams(location.search).get("join");
   if (code) {
+    $("versus-panel").open = true;
     $("join-code").value = code;
     setNet("You were invited to a game: enter your name and press “Join”.");
   }
@@ -1681,9 +1686,12 @@ document.addEventListener("keydown", event => {
 });
 
 // View tabs (Boosters & collection / Play)
-const views = ["collection-view", "play-view"];
+const views = ["collection-view", "deck-view", "play-view"];
 function showView(id) {
   if (!views.includes(id)) id = "collection-view";
+  document.body.classList.toggle("playing", id === "play-view" || id === "deck-view");
+  if (id === "deck-view") renderDeckBuilder();
+  if (id === "play-view") $("deck-line-text").textContent = deckSummary();
   for (const v of views) $(v).hidden = v !== id;
   document.querySelectorAll(".view-tabs .tab").forEach(tab => {
     tab.setAttribute("aria-pressed", String(tab.dataset.view === id));
@@ -1692,10 +1700,11 @@ function showView(id) {
 document.querySelectorAll(".view-tabs .tab").forEach(tab => {
   tab.addEventListener("click", () => {
     showView(tab.dataset.view);
-    history.replaceState(null, "", tab.dataset.view === "play-view" ? "#play" : "#");
+    history.replaceState(null, "", { "play-view": "#play", "deck-view": "#deck" }[tab.dataset.view] || "#");
   });
 });
-const viewFromHash = () => showView(location.hash === "#play" ? "play-view" : "collection-view");
+const viewFromHash = () =>
+  showView({ "#play": "play-view", "#deck": "deck-view" }[location.hash] || "collection-view");
 window.addEventListener("hashchange", viewFromHash);
 viewFromHash();
 
