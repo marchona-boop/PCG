@@ -29,12 +29,24 @@
 //   Items with an "improve budget" stat work the same way on the permanent
 //   work force cards on the work force board: their "budget" is changed, and a
 //   work force card whose budget drops to 0 or below is destroyed.
+// - Conditional effects: a card with
+//     "condition": ["text1", "text2"],
+//     "effect": [["reach", "+10"], ["robustness", "-5"]]
+//   gets the effect while it is on a board AND at least one OTHER card of the
+//   same stack has "text1" or "text2" in its name (case-insensitive). All the
+//   cards on the work force board count as one stack. Any numeric stat can be
+//   changed (reach, robustness, budget, workforce, degree, ...). A card without
+//   "condition" but with "effect" has its effect always on while on a board.
+//   If an effect drops a robustness or budget to 0 or below, the card is
+//   destroyed like with items.
 // - Score = sum of the reach of every card on the main board.
 // - The game ends when your hand is empty, when the deck is empty and no card
 //   can be played, or when you press "End game".
- 
+
 import { cards, typeInfo, collection, openCardInspection } from "./script.js";
- 
+
+const GAME_VERSION = "2026-10-25d";
+
 // ---- Tunable settings -------------------------------------------------------
 const HAND_SIZE = 5;          // cards in hand at the start
 const DECK_SIZE = 20;         // cards dealt into the deck (if you own enough)
@@ -48,9 +60,9 @@ const IMPROVE_BUDGET_FIELD = "improve budget";
 const WF_PLACEMENTS_PER_TURN = 1; // permanent work force cards placeable per turn
 const BEST_KEY = "my-gacha-best-score-v1";
 // -----------------------------------------------------------------------------
- 
+
 const $ = id => document.getElementById(id);
- 
+
 // Parse stat values: numbers, "infinity", "∞", or fractions "1/2".
 function parseStat(value) {
   if (typeof value === "number") return value;
@@ -62,29 +74,39 @@ function parseStat(value) {
   const n = Number(s);
   return s !== "" && !Number.isNaN(n) ? n : NaN;
 }
- 
+
 function formatStat(n) {
   if (n === Infinity) return "∞";
   if (n === -Infinity) return "−∞";
   if (Number.isNaN(n)) return "?";
   return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
 }
- 
+
 const nonNegative = n => (Number.isNaN(n) || n < 0 ? 0 : n);
- 
+
 const degreeOf = card => parseStat(card.degree);
 const reachOf = card => nonNegative(parseStat(card.reach));
 const costOf = card => nonNegative(parseStat(card.cost));
 const workforceOf = card => nonNegative(parseStat(card.workforce));
-const isWorkforce = card => card.type === WORKFORCE_TYPE;
+const isWorkforce = card => normType(card.type) === normType(WORKFORCE_TYPE);
 const isPermanent = card => {
   const p = card.permanent;
   return p === true || p === 1 ||
     ["true", "yes", "1"].includes(String(p ?? "").trim().toLowerCase());
 };
 const isPermanentWf = card => isWorkforce(card) && isPermanent(card);
+// A regular card with "workforce" among its subtypes: it can go either on the
+// main board (as a normal card) or on the work force bench (as permanent work force).
+const isHybridWf = card => isPlayCard(card) && typesOf(card).has(normType(WORKFORCE_TYPE));
+// A permanent item with "workforce" among its subtypes can be set up on the
+// work force bench (e.g. a coffee machine). It provides its "workforce" stat
+// (0 if none) plus any conditional effect it has there.
+const isBenchItem = card =>
+  isItem(card) && isPermanent(card) && typesOf(card).has(normType(WORKFORCE_TYPE));
+const canJoinBench = card => isPermanentWf(card) || isHybridWf(card) || isBenchItem(card);
+const onBench = inst => !!game && game.wfBoard.includes(inst);
 const isSingleUseWf = card => isWorkforce(card) && !isPermanent(card);
-const isItem = card => card.type === ITEM_TYPE;
+const isItem = card => normType(card.type) === normType(ITEM_TYPE);
 const isPlayCard = card => !isWorkforce(card) && !isItem(card);
 const improveOf = card => {
   const n = parseStat(card[IMPROVE_FIELD]);
@@ -107,38 +129,165 @@ const baseBudgetOf = card => {
 };
 // Current budget of a work force card on its board, including attached items.
 const budgetOf = inst =>
-  baseBudgetOf(inst.card) + (inst.items || []).reduce((s, it) => s + improveBudgetOf(it.card), 0);
- 
+  baseBudgetOf(inst.card) + (inst.items || []).reduce((s, it) => s + improveBudgetOf(it.card), 0) +
+  effectBonus(inst, "budget");
+
 // Current robustness of a card on the board, including attached items.
 const robustnessOf = inst =>
-  baseRobustnessOf(inst.card) + (inst.items || []).reduce((s, it) => s + improveOf(it.card), 0);
+  baseRobustnessOf(inst.card) + (inst.items || []).reduce((s, it) => s + improveOf(it.card), 0) +
+  effectBonus(inst, "robustness");
 const typeName = type => (typeInfo[type] || {}).name || type || "Unclassified";
- 
+
+// ---- Conditional effects ------------------------------------------------------
+// Accepted "effect" formats:
+//   [["reach", "+1"], ["robustness", "-1"]]   (list of pairs)
+//   ["reach", "+1"]                          (a single pair)
+//   {"reach": "+1", "robustness": -1}         (object)
+function effectsOf(card) {
+  const e = card.effect;
+  if (!e) return [];
+  let pairs;
+  if (Array.isArray(e)) {
+    pairs = e.length && !Array.isArray(e[0]) && typeof e[0] === "string" ? [e] : e;
+  } else if (typeof e === "object") {
+    pairs = Object.entries(e);
+  } else {
+    return [];
+  }
+  return pairs
+    .filter(p => Array.isArray(p) && p.length >= 2)
+    .map(([stat, value]) => ({ stat: String(stat).trim().toLowerCase(), delta: parseStat(value) }))
+    .filter(x => x.stat && !Number.isNaN(x.delta));
+}
+
+function conditionsOf(card) {
+  const c = card.condition;
+  const list = Array.isArray(c) ? c : c === undefined || c === null ? [] : [c];
+  return list.map(x => String(x).trim().toLowerCase()).filter(Boolean);
+}
+
+// The group a board card belongs to: its stack, or the whole work force board.
+function groupOf(inst) {
+  if (!game) return null;
+  for (const stack of game.stacks) if (stack && stack.includes(inst)) return stack;
+  if (game.wfBoard.includes(inst)) return game.wfBoard;
+  return null;
+}
+
+// Is this board card's effect currently active?
+function nameMatches(other, conds) {
+  const name = String((other.base || other.card).name || "").toLowerCase();
+  return conds.some(text => name.includes(text));
+}
+
+// Is this board card's effect currently active? (cards in a stack or on the
+// work force bench: the condition is checked within that stack / the bench)
+function effectActive(inst) {
+  const base = inst.base || inst.card;
+  if (!effectsOf(base).length) return false;
+  const group = groupOf(inst);
+  if (!group) return false;
+  const conds = conditionsOf(base);
+  if (!conds.length) return true;
+  return group.some(other => other !== inst && nameMatches(other, conds));
+}
+
+// Effect of a card that is NOT in a stack or on the bench (in the hand, or an
+// item attached to a card): the condition is checked against every card on
+// both boards.
+function looseEffectActive(inst) {
+  const base = inst.base;
+  if (!game || !effectsOf(base).length) return false;
+  const conds = conditionsOf(base);
+  if (!conds.length) return true;
+  const onBoards = [...game.stacks.flatMap(st => st || []), ...game.wfBoard];
+  return onBoards.some(other => other !== inst && nameMatches(other, conds));
+}
+
+// The card as it currently is for a hand card / attached item: a copy of the
+// base card with the active effect applied to its stats.
+function effectiveCard(inst) {
+  const base = inst.base;
+  if (!looseEffectActive(inst)) return base;
+  const view = { ...base, effectActive: true };
+  for (const { stat, delta } of effectsOf(base)) {
+    const key = Object.keys(base).find(k => k.trim().toLowerCase() === stat) || stat;
+    const current = parseStat(view[key]);
+    view[key] = (Number.isNaN(current) ? 0 : current) + delta;
+  }
+  return view;
+}
+
+// Card instances: `base` is the card from cards_data.json; `card` gives the
+// base card while the instance is on a board (board effects are added by the
+// stat functions), and the effect-adjusted card everywhere else.
+function makeInst(card) {
+  const inst = { uid: ++uidCounter, base: card };
+  Object.defineProperty(inst, "card", {
+    enumerable: true,
+    get() { return groupOf(inst) ? inst.base : effectiveCard(inst); }
+  });
+  return inst;
+}
+
+// Total change applied to `stat` of a board card by its own active effect.
+function effectBonus(inst, stat) {
+  if (!inst || !effectActive(inst)) return 0;
+  return effectsOf(inst.card)
+    .filter(e => e.stat === stat)
+    .reduce((sum, e) => sum + e.delta, 0);
+}
+
+function describeEffects(card) {
+  const effects = effectsOf(card);
+  if (!effects.length) return "";
+  const sign = n => (n >= 0 ? "+" : "") + formatStat(n);
+  const what = effects.map(e => `${e.stat} ${sign(e.delta)}`).join(", ");
+  const conds = conditionsOf(card);
+  return conds.length
+    ? `${what} when “${conds.join("” or “")}” is in play (same stack on the board; anywhere on the boards from your hand)`
+    : `${what} (always)`;
+}
+
+// Effective stats of cards ON A BOARD (base value + items + active effect).
+const boardReach = inst => reachOf(inst.card) + effectBonus(inst, "reach");
+const boardDegree = inst => degreeOf(inst.card) + effectBonus(inst, "degree");
+const boardWorkforce = inst => workforceOf(inst.card) + effectBonus(inst, "workforce");
+
 // All types of a card: its primary "type" plus any subtypes. Accepts
 // "subtypes": ["a", "b"], "subtype": "a" or "subtype": ["a", "b"].
+// Type names are compared ignoring case, spaces, "-" and "_", so
+// "workforce", "Workforce", "work force" and "work_force" all match.
+function normType(t) {
+  return String(t ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+// Accepts "subtypes" or "subtype" (any case), as a list ["a", "b"] or as
+// text "a" / "a, b".
 function typesOf(card) {
   const set = new Set();
-  if (card.type) set.add(String(card.type).trim());
-  for (const field of ["subtypes", "subtype"]) {
-    const v = card[field];
-    const list = Array.isArray(v) ? v : v === undefined || v === null ? [] : [v];
+  if (card.type) set.add(normType(card.type));
+  for (const key of Object.keys(card)) {
+    if (!/^sub[\s_-]?types?$/i.test(key.trim())) continue;
+    const v = card[key];
+    const list = Array.isArray(v) ? v : v === undefined || v === null ? [] : String(v).split(/[,;]/);
     for (const t of list) {
-      const name = String(t).trim();
+      const name = normType(t);
       if (name) set.add(name);
     }
   }
   return set;
 }
- 
+
 // Two cards can be stacked if they share at least one type or subtype.
 function sharesType(a, b) {
   const typesB = typesOf(b);
   for (const t of typesOf(a)) if (typesB.has(t)) return true;
   return false;
 }
- 
+
 const typeListName = card => [...typesOf(card)].map(typeName).join(" / ");
- 
+
 function shuffle(array) {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -146,7 +295,7 @@ function shuffle(array) {
   }
   return array;
 }
- 
+
 function loadBest() {
   try {
     const n = Number(localStorage.getItem(BEST_KEY));
@@ -155,24 +304,24 @@ function loadBest() {
     return 0;
   }
 }
- 
+
 function saveBest(n) {
   try { localStorage.setItem(BEST_KEY, String(n)); } catch { /* ignore */ }
 }
- 
+
 // ---- Game state -------------------------------------------------------------
 let game = null;
 let selected = null;    // index in game.hand, or null
 let best = loadBest();
 let uidCounter = 0;
- 
+
 function newGame() {
   const pool = [];
   for (const card of cards) {
     const copies = collection[card.id] || 0;
-    for (let i = 0; i < copies; i++) pool.push({ uid: ++uidCounter, card });
+    for (let i = 0; i < copies; i++) pool.push(makeInst(card));
   }
- 
+
   if (!pool.length) {
     game = null;
     selected = null;
@@ -180,7 +329,7 @@ function newGame() {
     setStatus("Your collection is empty — open some boosters first!");
     return;
   }
- 
+
   const deck = shuffle(pool).slice(0, DECK_SIZE);
   game = {
     deck,
@@ -202,23 +351,23 @@ function newGame() {
   setStatus("Place work force, then pick a card to play.");
   checkStuck();
 }
- 
+
 // ---- Work force & payment ---------------------------------------------------
-const boardWfTotal = () => game.wfBoard.reduce((s, inst) => s + workforceOf(inst.card), 0);
+const boardWfTotal = () => Math.max(0, game.wfBoard.reduce((s, inst) => s + boardWorkforce(inst), 0));
 const boardWfAvailable = () => Math.max(0, boardWfTotal() - game.wfSpent);
 const handWfInsts = () => game.hand.filter(inst => isSingleUseWf(inst.card));
 const handWfTotal = () => handWfInsts().reduce((s, inst) => s + workforceOf(inst.card), 0);
- 
+
 // Work out how to pay `cost`. Returns null if it can't be paid, otherwise
 // { cost, fromBoard, consume: [hand instances], fromHand, wasted }.
 function paymentPlan(cost) {
   const fromBoard = Math.min(cost, boardWfAvailable());
   const need = cost - fromBoard;
   if (need <= 0) return { cost, fromBoard, consume: [], fromHand: 0, wasted: 0 };
- 
+
   const temps = handWfInsts().filter(inst => workforceOf(inst.card) > 0);
   let bestSet = null, bestSum = Infinity;
- 
+
   if (temps.length <= 15) {
     // Exact search: smallest total that covers the need, then fewest cards.
     for (let mask = 1; mask < (1 << temps.length); mask++) {
@@ -244,18 +393,18 @@ function paymentPlan(cost) {
     bestSum = sum;
     if (sum < need) bestSet = null;
   }
- 
+
   if (!bestSet) return null;
   return { cost, fromBoard, consume: bestSet, fromHand: bestSum, wasted: bestSum - need };
 }
- 
+
 function applyPayment(plan) {
   game.wfSpent += plan.fromBoard;
   const ids = new Set(plan.consume.map(inst => inst.uid));
   game.hand = game.hand.filter(inst => !ids.has(inst.uid));
   game.consumed += plan.consume.length;
 }
- 
+
 function describePayment(plan) {
   if (!plan || plan.cost === 0) return "free";
   const parts = [];
@@ -271,38 +420,38 @@ function describePayment(plan) {
   if (plan.wasted > 0) text += ` — ${formatStat(plan.wasted)} wasted`;
   return text;
 }
- 
+
 function shortfall(card) {
   return costOf(card) - boardWfAvailable() - handWfTotal();
 }
- 
+
 // ---- Rules ------------------------------------------------------------------
 function canPlaceOn(card, stack) {
   if (!stack) return true; // empty slot
   const top = stack[stack.length - 1].card;
-  return sharesType(card, top) && degreeOf(card) < degreeOf(top);
+  return sharesType(card, top) && degreeOf(card) < boardDegree(stack[stack.length - 1]);
 }
- 
+
 function canAfford(card) {
   return paymentPlan(costOf(card)) !== null;
 }
- 
+
 function canPlaceWorkforce() {
   return game.wfPlaced < WF_PLACEMENTS_PER_TURN;
 }
- 
+
 // The stat an item changes on a given board card, or null if it can't target it.
 function itemStatFor(item, inst) {
   if (!inst) return null;
-  if (isPlayCard(inst.card) && affectsRobustness(item)) {
+  if (!onBench(inst) && isPlayCard(inst.card) && affectsRobustness(item)) {
     return { label: "robustness", now: robustnessOf(inst), delta: improveOf(item) };
   }
-  if (isPermanentWf(inst.card) && affectsBudget(item)) {
+  if (onBench(inst) && affectsBudget(item)) {
     return { label: "budget", now: budgetOf(inst), delta: improveBudgetOf(item) };
   }
   return null;
 }
- 
+
 // Can this item be used on this board card?
 function canUseItemOn(item, inst) {
   const stat = itemStatFor(item, inst);
@@ -310,7 +459,7 @@ function canUseItemOn(item, inst) {
   if (isPermanent(item)) return true;
   return stat.now + stat.delta <= 0; // single use: must destroy
 }
- 
+
 function itemTargets(item) {
   const out = [];
   game.stacks.forEach((stack, slot) => {
@@ -323,7 +472,7 @@ function itemTargets(item) {
   });
   return out;
 }
- 
+
 // Text describing what an item would do to a board card.
 function itemEffectText(item, inst, above = 0) {
   const stat = itemStatFor(item, inst);
@@ -334,36 +483,37 @@ function itemEffectText(item, inst, above = 0) {
   }
   return `${stat.label} ${formatStat(stat.now)} → ${formatStat(after)}`;
 }
- 
+
 // Can this hand card do anything right now?
 function hasLegalAction(card) {
   if (isSingleUseWf(card)) return false;
   if (!canAfford(card)) return false;
   if (isPermanentWf(card)) return canPlaceWorkforce();
-  if (isItem(card)) return itemTargets(card).length > 0;
+  if (isItem(card)) return itemTargets(card).length > 0 || (isBenchItem(card) && canPlaceWorkforce());
+  if (isHybridWf(card) && canPlaceWorkforce()) return true;
   return game.stacks.some(stack => canPlaceOn(card, stack));
 }
- 
+
 function stackReach(stack) {
-  return stack ? stack.reduce((sum, inst) => sum + reachOf(inst.card), 0) : 0;
+  return stack ? stack.reduce((sum, inst) => sum + boardReach(inst), 0) : 0;
 }
- 
+
 function totalScore() {
   return game ? game.stacks.reduce((sum, s) => sum + stackReach(s), 0) : 0;
 }
- 
+
 // ---- Actions ----------------------------------------------------------------
 function selectedInst() {
   return game && selected !== null ? game.hand[selected] : null;
 }
- 
+
 function playTo(slot) {
   if (!game || game.over) return;
   const inst = selectedInst();
   if (!inst || !isPlayCard(inst.card)) return;
   const card = inst.card;
   const stack = game.stacks[slot];
- 
+
   const plan = paymentPlan(costOf(card));
   if (!plan) {
     setStatus(`Not enough work force for ${card.name}: you are ${formatStat(shortfall(card))} short.`);
@@ -374,14 +524,14 @@ function playTo(slot) {
     setStatus(
       !sharesType(card, top)
         ? `Can't stack: ${card.name} (${typeListName(card)}) shares no type or subtype with ${top.name} (${typeListName(top)}).`
-        : `Can't stack: degree ${formatStat(degreeOf(card))} must be strictly lower than ${formatStat(degreeOf(top))}.`
+        : `Can't stack: degree ${formatStat(degreeOf(card))} must be strictly lower than ${formatStat(boardDegree(stack[stack.length - 1]))}.`
     );
     return;
   }
- 
+
   applyPayment(plan);
   game.hand = game.hand.filter(i => i.uid !== inst.uid);
- 
+
   let message;
   inst.items = [];
   if (stack) {
@@ -394,15 +544,15 @@ function playTo(slot) {
   if (plan.cost > 0) message += ` (${describePayment(plan)})`;
   endTurn(message);
 }
- 
+
 function useItemOn(slot, index) {
   useItem({ kind: "stack", slot, index });
 }
- 
+
 function useItemOnWorkforce(index) {
   useItem({ kind: "wf", index });
 }
- 
+
 function useItem(where) {
   if (!game || game.over) return;
   const itemInst = selectedInst();
@@ -411,7 +561,7 @@ function useItem(where) {
   const stack = where.kind === "stack" ? game.stacks[where.slot] : null;
   const target = where.kind === "stack" ? stack && stack[where.index] : game.wfBoard[where.index];
   if (!target) return;
- 
+
   const plan = paymentPlan(costOf(item));
   if (!plan) {
     setStatus(`Not enough work force for ${item.name}: you are ${formatStat(shortfall(item))} short.`);
@@ -427,10 +577,10 @@ function useItem(where) {
     );
     return;
   }
- 
+
   applyPayment(plan);
   game.hand = game.hand.filter(i => i.uid !== itemInst.uid);
- 
+
   let message;
   if (isPermanent(item)) {
     target.items = target.items || [];
@@ -441,32 +591,34 @@ function useItem(where) {
     game.itemsUsed++;
     message = `Used ${item.name} on ${target.card.name}.`;
   }
- 
+
   const current = itemStatFor(item, target).now;
   if (!isPermanent(item) || current <= 0) {
+    const scoreBefore = totalScore();
+    const wfBefore = boardWfTotal();
     if (where.kind === "stack") {
       const destroyed = stack.splice(where.index);
       if (!stack.length) game.stacks[where.slot] = null;
       game.destroyed += destroyed.length;
-      const lost = destroyed.reduce((s, d) => s + reachOf(d.card), 0);
+      const lost = scoreBefore - totalScore();
       message += destroyed.length > 1
         ? ` ${target.card.name} and the ${destroyed.length - 1} card(s) stacked on it were destroyed (−${formatStat(lost)} reach).`
         : ` ${target.card.name} was destroyed (−${formatStat(lost)} reach).`;
     } else {
       game.wfBoard.splice(where.index, 1);
       game.destroyed++;
-      message += ` ${target.card.name} was destroyed (−${formatStat(workforceOf(target.card))} work force per turn).`;
+      message += ` ${target.card.name} was destroyed (−${formatStat(wfBefore - boardWfTotal())} work force per turn).`;
     }
   }
   if (plan.cost > 0) message += ` (${describePayment(plan)})`;
   endTurn(message);
 }
- 
+
 function placeWorkforce() {
   if (!game || game.over) return;
   const inst = selectedInst();
-  if (!inst || !isPermanentWf(inst.card)) return;
- 
+  if (!inst || !canJoinBench(inst.card)) return;
+
   if (!canPlaceWorkforce()) {
     setStatus("You've already placed a work force card this turn.");
     return;
@@ -476,21 +628,25 @@ function placeWorkforce() {
     setStatus(`Not enough work force to recruit ${inst.card.name}.`);
     return;
   }
- 
+
   applyPayment(plan);
   game.hand = game.hand.filter(i => i.uid !== inst.uid);
   inst.items = [];
   game.wfBoard.push(inst);
   game.wfPlaced++;
   selected = null;
- 
-  let message = `${inst.card.name} joined your work force (+${formatStat(workforceOf(inst.card))} every turn, starting now).`;
+
+  const wf = boardWorkforce(inst);
+  let message = wf
+    ? `${inst.card.name} joined your work force (+${formatStat(wf)} every turn, starting now).`
+    : `${inst.card.name} was set up on the work force board.`;
+  message += resolveDestruction();
   if (plan.cost > 0) message += ` (${describePayment(plan)})`;
   render();
   setStatus(message + " Now play a card, pass or discard.");
   checkStuck();
 }
- 
+
 function discardSelected() {
   if (!game || game.over) return;
   const inst = selectedInst();
@@ -499,48 +655,86 @@ function discardSelected() {
   game.discarded++;
   endTurn(`Discarded ${inst.card.name}.`);
 }
- 
+
 function passTurn() {
   if (!game || game.over || !game.deck.length) return;
   endTurn("You passed.");
 }
- 
+
 function endTurn(message) {
   selected = null;
   game.lastDrawn = null;
- 
+  message += resolveDestruction();
+
   if (game.deck.length) {
     const drawn = game.deck.shift();
     game.hand.push(drawn);
     game.lastDrawn = drawn.uid;
     message += ` You drew ${drawn.card.name}.`;
   }
- 
+
   // New turn: the work force board refreshes.
   game.wfSpent = 0;
   game.wfPlaced = 0;
   game.turn++;
- 
+
   render();
   setStatus(message);
-  checkStuck();
+  checkStuck(message);
 }
- 
+
+// Destroy any board card whose robustness/budget is now 0 or below (e.g. after
+// an effect changed). Repeats until stable, since destroying a card can switch
+// other effects on or off. Returns a message ("" if nothing happened).
+function resolveDestruction() {
+  if (!game) return "";
+  const notes = [];
+  for (let guard = 0; guard < 200; guard++) {
+    let hit = false;
+    for (let slot = 0; slot < game.stacks.length && !hit; slot++) {
+      const stack = game.stacks[slot];
+      if (!stack) continue;
+      const index = stack.findIndex(inst => robustnessOf(inst) <= 0);
+      if (index === -1) continue;
+      const name = stack[index].card.name;
+      const destroyed = stack.splice(index);
+      if (!stack.length) game.stacks[slot] = null;
+      game.destroyed += destroyed.length;
+      notes.push(destroyed.length > 1
+        ? `${name} and ${destroyed.length - 1} card(s) on it collapsed`
+        : `${name} collapsed`);
+      hit = true;
+    }
+    if (!hit) {
+      const index = game.wfBoard.findIndex(inst => budgetOf(inst) <= 0);
+      if (index !== -1) {
+        notes.push(`${game.wfBoard[index].card.name} ran out of budget`);
+        game.wfBoard.splice(index, 1);
+        game.destroyed++;
+        hit = true;
+      }
+    }
+    if (!hit) break;
+  }
+  return notes.length ? ` Effects: ${notes.join("; ")}.` : "";
+}
+
 // End the game automatically when nothing more can happen.
-function checkStuck() {
+function checkStuck(lastMessage = "") {
   if (!game || game.over) return;
+  const prefix = lastMessage ? lastMessage + " " : "";
   if (!game.hand.length) {
-    finishGame("Your hand is empty.");
+    finishGame(prefix + "Your hand is empty.");
   } else if (!game.deck.length && !game.hand.some(inst => hasLegalAction(inst.card))) {
-    finishGame("The deck is empty and no card in your hand can be played.");
+    finishGame(prefix + "The deck is empty and no card in your hand can be played.");
   }
 }
- 
+
 function finishGame(prefix = "") {
   if (!game || game.over) return;
   game.over = true;
   selected = null;
- 
+
   const score = totalScore();
   let message = `${prefix} Game over — final score ${formatStat(score)}.`.trim();
   if (score > best) {
@@ -551,12 +745,12 @@ function finishGame(prefix = "") {
   render();
   setStatus(message);
 }
- 
+
 // ---- Rendering --------------------------------------------------------------
 function setStatus(text) {
   $("game-status").textContent = text;
 }
- 
+
 function badge(className, text, title) {
   const el = document.createElement("span");
   el.className = className;
@@ -564,7 +758,7 @@ function badge(className, text, title) {
   if (title) el.title = title;
   return el;
 }
- 
+
 function makeGameCard(card) {
   const el = document.createElement("article");
   const rarityClass = String(card.rarity).toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -576,7 +770,7 @@ function makeGameCard(card) {
   if (isItem(card)) {
     el.classList.add("item-card", isPermanent(card) ? "item-permanent" : "item-single");
   }
- 
+
   const head = document.createElement("div");
   head.className = "gc-head";
   const name = document.createElement("span");
@@ -586,7 +780,7 @@ function makeGameCard(card) {
   if (isPlayCard(card)) {
     head.append(badge("gc-degree", formatStat(degreeOf(card)), "Degree"));
   }
- 
+
   const art = document.createElement("div");
   art.className = "gc-art";
   const img = document.createElement("img");
@@ -594,7 +788,7 @@ function makeGameCard(card) {
   img.alt = card.name;
   img.loading = "lazy";
   art.append(img);
- 
+
   const foot = document.createElement("div");
   foot.className = "gc-foot";
   const type = document.createElement("span");
@@ -615,11 +809,11 @@ function makeGameCard(card) {
     type.append(document.createTextNode(info.name || card.type || ""));
     foot.append(type, badge("gc-reach", formatStat(reachOf(card)), "Reach"));
   }
- 
+
   el.append(head, art, foot);
   return el;
 }
- 
+
 function makeActivatable(el, label, onActivate) {
   el.tabIndex = 0;
   el.setAttribute("role", "button");
@@ -632,7 +826,7 @@ function makeActivatable(el, label, onActivate) {
     }
   });
 }
- 
+
 function render() {
   renderHud();
   renderWorkforceBoard();
@@ -644,7 +838,7 @@ function render() {
   $("pass-turn").disabled = !active || !game.deck.length;
   $("new-game").textContent = active ? "Restart" : "New game";
 }
- 
+
 function renderHud() {
   $("hud-score").textContent = formatStat(totalScore());
   $("hud-best").textContent = formatStat(best);
@@ -655,19 +849,19 @@ function renderHud() {
     : "0";
   $("hud-wf-hand").textContent = game ? "+" + formatStat(handWfTotal()) : "+0";
 }
- 
+
 function renderWorkforceBoard() {
   const zone = $("wf-board");
   zone.replaceChildren();
   zone.className = "wf-board";
- 
+
   const inst = selectedInst();
-  const placing = inst && isPermanentWf(inst.card);
+  const placing = inst && canJoinBench(inst.card);
   const ok = placing && canPlaceWorkforce() && canAfford(inst.card);
   if (placing) zone.classList.add(ok ? "valid-target" : "invalid-target");
   const selItem = inst && isItem(inst.card) ? inst.card : null;
   const affordable = selItem ? canAfford(selItem) : false;
- 
+
   if (!game || !game.wfBoard.length) {
     const empty = document.createElement("p");
     empty.className = "wf-empty";
@@ -677,7 +871,11 @@ function renderWorkforceBoard() {
     game.wfBoard.forEach((w, index) => {
       const el = makeGameCard(w.card);
       addBoardOverlays(el, w);
-      if (selItem) {
+      const benchItem = selItem && isBenchItem(selItem) && canUseItemOn(selItem, w) === false;
+      if (benchItem) {
+        // Setting up a bench item: clicking an existing bench card just places
+        // it on the board (the click goes through to the work force zone).
+      } else if (selItem) {
         const valid = affordable && canUseItemOn(selItem, w);
         el.classList.add(valid ? "item-target" : "item-invalid");
         const effect = itemEffectText(selItem, w);
@@ -697,7 +895,7 @@ function renderWorkforceBoard() {
       zone.append(el);
     });
   }
- 
+
   // The zone itself is a button only while placing a permanent work force card
   // (its click handler is attached once, in the wiring section below).
   if (placing) {
@@ -709,31 +907,31 @@ function renderWorkforceBoard() {
     zone.removeAttribute("tabindex");
     zone.removeAttribute("aria-label");
   }
- 
+
   $("wf-summary").textContent = game
     ? `available this turn ${formatStat(boardWfAvailable())} / ${formatStat(boardWfTotal())}` +
       ` · single-use in hand +${formatStat(handWfTotal())}`
     : "";
 }
- 
+
 function renderBoard() {
   const board = $("board");
   board.replaceChildren();
- 
+
   const stacks = game ? game.stacks : Array(BOARD_SLOTS).fill(null);
   const inst = selectedInst();
   const selCard = inst && isPlayCard(inst.card) ? inst.card : null;   // placing a card
   const selItem = inst && isItem(inst.card) ? inst.card : null;       // targeting with an item
   const affordable = inst ? canAfford(inst.card) : false;
- 
+
   stacks.forEach((stack, slot) => {
     const slotEl = document.createElement("div");
     slotEl.className = "slot";
- 
+
     const valid = selCard && affordable && canPlaceOn(selCard, stack);
     if (valid) slotEl.classList.add("valid-target");
     if (selCard && !valid) slotEl.classList.add("invalid-target");
- 
+
     if (!stack) {
       slotEl.classList.add("empty-slot");
       const label = document.createElement("span");
@@ -747,7 +945,7 @@ function renderBoard() {
         cardEl.style.setProperty("--i", i);
         if (i === stack.length - 1) cardEl.classList.add("top");
         addBoardOverlays(cardEl, s);
- 
+
         if (selItem) {
           const ok = affordable && canUseItemOn(selItem, s);
           cardEl.classList.add(ok ? "item-target" : "item-invalid");
@@ -767,7 +965,7 @@ function renderBoard() {
         }
         pile.append(cardEl);
       });
- 
+
       const top = stack[stack.length - 1].card;
       const info = document.createElement("p");
       info.className = "stack-info";
@@ -778,7 +976,7 @@ function renderBoard() {
       info.append(t, r);
       slotEl.append(pile, info);
     }
- 
+
     if (selCard) {
       makeActivatable(
         slotEl,
@@ -789,13 +987,22 @@ function renderBoard() {
     board.append(slotEl);
   });
 }
- 
+
 // Attached item thumbnails and the modified robustness, drawn in the visible
 // top strip of a board card.
 function addBoardOverlays(cardEl, inst) {
   const items = inst.items || [];
-  if (!items.length) return;
- 
+  const active = effectActive(inst);
+  if (effectsOf(inst.card).length) {
+    cardEl.classList.toggle("effect-on", active);
+    cardEl.title = `${active ? "Effect active" : "Effect inactive"}: ${describeEffects(inst.card)}`;
+  }
+  const isWfCard = onBench(inst);
+  const statBase = isWfCard ? baseBudgetOf(inst.card) : baseRobustnessOf(inst.card);
+  const statNow = isWfCard ? budgetOf(inst) : robustnessOf(inst);
+  const reachDelta = isWfCard ? 0 : boardReach(inst) - reachOf(inst.card);
+  if (!items.length && statNow === statBase && !reachDelta) return;
+
   const strip = document.createElement("div");
   strip.className = "gc-attached";
   for (const it of items) {
@@ -803,8 +1010,8 @@ function addBoardOverlays(cardEl, inst) {
     chip.className = "gc-item-chip";
     chip.src = it.card.image;
     chip.alt = it.card.name;
-    const d = isWorkforce(inst.card) ? improveBudgetOf(it.card) : improveOf(it.card);
-    chip.title = `${it.card.name} (${d >= 0 ? "+" : ""}${formatStat(d)} ${isWorkforce(inst.card) ? "budget" : "robustness"})`;
+    const d = isWfCard ? improveBudgetOf(it.card) : improveOf(it.card);
+    chip.title = `${it.card.name} (${d >= 0 ? "+" : ""}${formatStat(d)} ${isWfCard ? "budget" : "robustness"})`;
     chip.addEventListener("click", event => {
       if (selected === null) {
         event.stopPropagation();
@@ -813,23 +1020,35 @@ function addBoardOverlays(cardEl, inst) {
     });
     strip.append(chip);
   }
- 
-  const isWf = isWorkforce(inst.card);
-  const base = isWf ? baseBudgetOf(inst.card) : baseRobustnessOf(inst.card);
-  const now = isWf ? budgetOf(inst) : robustnessOf(inst);
-  const rob = document.createElement("span");
-  rob.className = "gc-rob " + (isWf ? "budget " : "") + (now > base ? "up" : now < base ? "down" : "");
-  rob.textContent = formatStat(now);
-  rob.title = `${isWf ? "Budget" : "Robustness"} ${formatStat(base)} → ${formatStat(now)}`;
-  strip.append(rob);
- 
+
+  const isWf = isWfCard;
+  const base = statBase;
+  const now = statNow;
+  const spacer = document.createElement("span");
+  spacer.className = "gc-spacer";
+  strip.append(spacer);
+  if (reachDelta) {
+    const r = document.createElement("span");
+    r.className = "gc-rob reach " + (reachDelta > 0 ? "up" : "down");
+    r.textContent = formatStat(boardReach(inst));
+    r.title = `Reach ${formatStat(reachOf(inst.card))} → ${formatStat(boardReach(inst))}`;
+    strip.append(r);
+  }
+  if (items.length || now !== base) {
+    const rob = document.createElement("span");
+    rob.className = "gc-rob " + (isWf ? "budget " : "") + (now > base ? "up" : now < base ? "down" : "");
+    rob.textContent = formatStat(now);
+    rob.title = `${isWf ? "Budget" : "Robustness"} ${formatStat(base)} → ${formatStat(now)}`;
+    strip.append(rob);
+  }
+
   cardEl.append(strip);
 }
- 
+
 function renderHand() {
   const hand = $("hand");
   hand.replaceChildren();
- 
+
   if (!game) {
     const empty = document.createElement("p");
     empty.className = "empty";
@@ -837,7 +1056,7 @@ function renderHand() {
     hand.append(empty);
     return;
   }
- 
+
   if (game.over) {
     const over = document.createElement("p");
     over.className = "empty";
@@ -845,7 +1064,7 @@ function renderHand() {
     hand.append(over);
     return;
   }
- 
+
   game.hand.forEach((inst, index) => {
     const card = inst.card;
     const el = makeGameCard(card);
@@ -854,13 +1073,17 @@ function renderHand() {
     if (isSingleUseWf(card)) el.classList.add("resource");
     else if (!hasLegalAction(card)) el.classList.add("no-move");
     if (inst.uid === game.lastDrawn) el.classList.add("reveal");
- 
+    if (effectsOf(inst.base).length) {
+      el.classList.toggle("effect-on", !!card.effectActive);
+      el.title = `${card.effectActive ? "Effect active" : "Effect inactive"}: ${describeEffects(inst.base)}`;
+    }
+
     const desc = isWorkforce(card)
       ? `${card.name}, work force +${formatStat(workforceOf(card))}, ${isPermanent(card) ? "permanent" : "single use"}`
       : isItem(card)
       ? `${card.name}, item, ${isPermanent(card) ? "permanent" : "single use"}, robustness ${formatStat(improveOf(card))}, budget ${formatStat(improveBudgetOf(card))}, cost ${formatStat(costOf(card))}`
       : `${card.name}, ${typeName(card.type)}, cost ${formatStat(costOf(card))}, degree ${formatStat(degreeOf(card))}, reach ${formatStat(reachOf(card))}`;
- 
+
     makeActivatable(el, `${desc}. ${index === selected ? "Selected." : "Select."}`, () => {
       selected = selected === index ? null : index;
       render();
@@ -870,7 +1093,7 @@ function renderHand() {
     hand.append(el);
   });
 }
- 
+
 function hintFor(card) {
   if (isSingleUseWf(card)) {
     return "Single-use work force is spent automatically when you play a card. You can also discard it.";
@@ -883,6 +1106,22 @@ function hintFor(card) {
       ? "Click the work force board to place it."
       : "You've already placed a work force card this turn.";
   }
+  if (isHybridWf(card)) {
+    const board = game.stacks.some(stack => canPlaceOn(card, stack));
+    const bench = canPlaceWorkforce();
+    if (board && bench) return "Choose a highlighted slot on the board, or click the work force board to recruit it as work force.";
+    if (bench) return "No legal place on the board, but you can click the work force board to recruit it as work force.";
+    if (board) return "Choose a highlighted slot on the board (you've already placed work force this turn).";
+    return "No legal place for this card right now — you can discard it.";
+  }
+  if (isBenchItem(card)) {
+    const targets = itemTargets(card).length > 0;
+    const bench = canPlaceWorkforce();
+    if (targets && bench) return "Click the work force board to set it up there, or a highlighted card to use it on.";
+    if (bench) return "Click the work force board to set it up there.";
+    if (targets) return "Click a highlighted card to use it on (you've already placed work force this turn).";
+    return "You've already placed something on the work force board this turn.";
+  }
   if (isItem(card)) {
     if (hasLegalAction(card)) return "Click a highlighted card on the board to use this item on it.";
     return isPermanent(card)
@@ -893,7 +1132,7 @@ function hintFor(card) {
     ? "Choose a highlighted slot on the board."
     : "No legal place for this card on the board — you can discard it.";
 }
- 
+
 function renderSelectionBar() {
   const bar = $("selection-bar");
   const inst = selectedInst();
@@ -903,7 +1142,7 @@ function renderSelectionBar() {
   }
   const card = inst.card;
   bar.hidden = false;
- 
+
   let text;
   if (isWorkforce(card)) {
     text = `${card.name} — work force +${formatStat(workforceOf(card))} · ` +
@@ -930,9 +1169,19 @@ function renderSelectionBar() {
       (rob === Infinity ? "" : ` · robustness ${formatStat(rob)}`) + " · " +
       (plan ? describePayment(plan) : `cost ${formatStat(costOf(card))} (can't afford)`);
   }
+  if (isBenchItem(card)) {
+    text += " · can be set up on the work force board" +
+      (workforceOf(card) ? ` (+${formatStat(workforceOf(card))})` : "");
+  }
+  if (isHybridWf(card)) {
+    text += ` · can also join the work force (+${formatStat(workforceOf(card))}` +
+      (baseBudgetOf(card) !== Infinity ? `, budget ${formatStat(baseBudgetOf(card))}` : "") + ")";
+  }
+  const eff = describeEffects(inst.base);
+  if (eff) text += ` · effect${card.effectActive ? " (active)" : ""}: ${eff}`;
   $("selection-text").textContent = text;
 }
- 
+
 // ---- Wiring -----------------------------------------------------------------
 $("new-game").addEventListener("click", () => {
   if (game && !game.over && !confirm("Abandon the current game and start a new one?")) return;
@@ -942,12 +1191,12 @@ $("end-game").addEventListener("click", () => finishGame());
 $("pass-turn").addEventListener("click", passTurn);
 $("wf-board").addEventListener("click", () => {
   const inst = selectedInst();
-  if (inst && isPermanentWf(inst.card)) placeWorkforce();
+  if (inst && canJoinBench(inst.card)) placeWorkforce();
 });
 $("wf-board").addEventListener("keydown", event => {
   const inst = selectedInst();
   if ((event.key === "Enter" || event.key === " ") && event.target === $("wf-board") &&
-      inst && isPermanentWf(inst.card)) {
+      inst && canJoinBench(inst.card)) {
     event.preventDefault();
     placeWorkforce();
   }
@@ -962,14 +1211,14 @@ $("sel-inspect").addEventListener("click", () => {
   const inst = selectedInst();
   if (inst) openCardInspection(inst.card);
 });
- 
+
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && selected !== null && $("card-modal").hidden) {
     selected = null;
     render();
   }
 });
- 
+
 // View tabs (Boosters & collection / Play)
 const views = ["collection-view", "play-view"];
 function showView(id) {
@@ -988,6 +1237,9 @@ document.querySelectorAll(".view-tabs .tab").forEach(tab => {
 const viewFromHash = () => showView(location.hash === "#play" ? "play-view" : "collection-view");
 window.addEventListener("hashchange", viewFromHash);
 viewFromHash();
- 
+
 render();
- 
+
+// Show which game version is running (helps spot an outdated cached file).
+const footer = document.querySelector("footer");
+if (footer) footer.append(` · Game version ${GAME_VERSION}`);

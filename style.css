@@ -1,4 +1,3 @@
-
 :root {
     color-scheme: dark;
     --bg: #100f19;
@@ -7,27 +6,27 @@
     --text: #f5f3ff;
     --muted: #aaa6c0;
 }
- 
+
   * { box-sizing: border-box; }
- 
+
   body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
     font: 16px/1.5 system-ui, sans-serif;
   }
- 
+
   header {
     text-align: center;
     padding: 36px 16px 24px;
     background: linear-gradient(145deg, #292044, #14111f);
   }
- 
+
   header h1 { margin: 0 0 8px; font-size: clamp(2rem, 6vw, 3.5rem); }
   header p { color: var(--muted); margin: 0; }
- 
+
   main { max-width: 1100px; margin: auto; padding: 24px 16px 60px; }
- 
+
   .controls {
     display: flex;
     justify-content: center;
@@ -35,7 +34,7 @@
     flex-wrap: wrap;
     margin: 20px 0;
   }
- 
+
   button {
     background: var(--accent);
     color: #171126;
@@ -46,21 +45,21 @@
     font-weight: 750;
     cursor: pointer;
   }
- 
+
   button.secondary { background: #302b43; color: var(--text); }
   button:hover { filter: brightness(1.12); }
   button:focus-visible { outline: 3px solid white; outline-offset: 3px; }
- 
+
   #status { color: var(--muted); text-align: center; min-height: 24px; }
- 
+
   h2 { margin-top: 36px; }
- 
+
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
     gap: 16px;
   }
- 
+
   .card {
     min-width: 0;
     background: var(--panel);
@@ -69,7 +68,7 @@
     padding: 10px;
     overflow: hidden;
   }
- 
+
   .card img {
     display: block;
     width: 100%;
@@ -78,11 +77,11 @@
     background: #100f19;
     border-radius: 7px;
   }
- 
+
   .card h3 { font-size: 1rem; margin: 10px 0 2px; overflow-wrap: anywhere; }
   .card p { color: var(--muted); font-size: .88rem; margin: 0; }
   .count { color: #d4c4ff !important; margin-top: 6px !important; }
- 
+
   .empty {
     color: var(--muted);
     background: var(--panel);
@@ -91,10 +90,10 @@
     text-align: center;
     grid-column: 1 / -1;
   }
- 
+
   footer { color: var(--muted); text-align: center; padding: 24px; font-size: .85rem; }
- 
- 
+
+
 /* Cosmic laboratory theme */
 :root {
   --bg: #080d1a;
@@ -103,14 +102,14 @@
   --text: #eff8ff;
   --muted: #94a9c4;
 }
- 
+
 body {
   background:
     radial-gradient(ellipse at 50% 0%, #172c4b 0%, transparent 55%),
     var(--bg);
   background-attachment: fixed;
 }
- 
+
 header {
   position: relative;
   overflow: hidden;
@@ -120,39 +119,39 @@ header {
     linear-gradient(145deg, #101a33, #080d1a);
   border-bottom: 1px solid #29435e;
 }
- 
+
 header h1 {
   letter-spacing: 0.04em;
   text-shadow: 0 0 28px #72e0f566;
 }
- 
+
 header p {
   font-size: 1.05rem;
   letter-spacing: 0.08em;
 }
- 
+
 main {
   max-width: 1200px;
 }
- 
+
 h2 {
   letter-spacing: 0.025em;
 }
- 
+
 button {
   transition: transform 180ms ease, box-shadow 180ms ease;
   box-shadow: 0 4px 20px #72e0f51c;
 }
- 
+
 button:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 25px #72e0f544;
 }
- 
+
 button.secondary {
   border: 1px solid #3b4967;
 }
- 
+
 .grid {
   grid-template-columns: repeat(
     auto-fill, minmax(175px, 1fr)
@@ -160,7 +159,7 @@ button.secondary {
   gap: 20px;
   justify-content: center;
 }
- 
+
 .card {
   position: relative;
   padding: 10px;
@@ -172,32 +171,32 @@ button.secondary {
     border-color 220ms ease,
     box-shadow 220ms ease;
 }
- 
+
 .card:hover {
   transform: translateY(-5px);
   border-color: #72e0f5;
   box-shadow: 0 12px 30px #0007, 0 0 18px #72e0f51a;
 }
- 
+
 .card img {
   background: #080d1a;
   border-radius: 9px;
 }
- 
+
 .card h3 {
   line-height: 1.35;
 }
- 
+
 .card p {
   line-height: 1.5;
 }
- 
+
 .card .description {
   margin-top: 8px;
   font-size: 0.84rem;
   color: #b9cbe0;
 }
- 
+
 .card .rarity {
   display: inline-block;
   margin-top: 6px;
@@ -208,32 +207,32 @@ button.secondary {
   font-size: 0.75rem;
   font-weight: 750;
 }
- 
+
 .card.rarity-rare {
   border-color: #a78bfa;
   box-shadow: inset 0 0 18px #a78bfa0b;
 }
- 
+
 .card.rarity-rare .rarity {
   background: #49316c;
   color: #e1ceff;
 }
- 
+
 .card.rarity-legendary {
   border-color: #e9bd68;
   background: linear-gradient(145deg, #352a27, #171a2b 65%);
   box-shadow: inset 0 0 24px #f8cf6710;
 }
- 
+
 .card.rarity-legendary .rarity {
   background: #665022;
   color: #ffe5a1;
 }
- 
+
 .card.reveal {
   animation: cardReveal 450ms ease both;
 }
- 
+
 @keyframes cardReveal {
   from {
     opacity: 0;
@@ -244,34 +243,34 @@ button.secondary {
     transform: translateY(0) scale(1);
   }
 }
- 
+
 @media (max-width: 480px) {
   .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
   }
- 
+
   header {
     padding: 38px 14px 30px;
   }
- 
+
   main {
     padding-inline: 12px;
   }
 }
- 
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
 }
- 
- 
+
+
 /* Compact card album */
- 
- 
- 
+
+
+
 #collection .collection-type-grid {
   display: flex;
   flex-direction: row;
@@ -281,62 +280,62 @@ button.secondary {
   gap: 14px;
   width: 100%;
 }
- 
+
 #collection .collection-type-grid > .card {
   flex: 0 0 98px;
   width: 98px;
 }
- 
+
 @media (max-width: 480px) {
   #collection .collection-type-grid {
     gap: 9px;
   }
- 
+
   #collection .collection-type-grid > .card {
     flex-basis: calc((100% - 18px) / 3);
     width: auto;
   }
 }
- 
- 
- 
+
+
+
 #collection .card {
   padding: 7px;
   border-radius: 10px;
   cursor: pointer;
 }
- 
+
 #collection .card img {
   aspect-ratio: 2 / 3;
   border-radius: 6px;
 }
- 
+
 #collection .card h3 {
   font-size: 0.84rem;
   margin-top: 7px;
 }
- 
+
 #collection .card .rarity {
   font-size: 0.68rem;
   padding: 2px 7px;
 }
- 
+
 #collection .card .description {
   display: none;
 }
- 
+
 #collection .card .count {
   font-size: 0.78rem;
 }
- 
+
 @media (max-width: 480px) {
   #collection.grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 9px;
   }
 }
- 
- 
+
+
 /* Card inspection overlay */
 .modal-overlay {
   position: fixed;
@@ -349,11 +348,11 @@ button.secondary {
   background: rgba(3, 6, 16, 0.84);
   backdrop-filter: blur(9px);
 }
- 
+
 .modal-overlay[hidden] {
   display: none;
 }
- 
+
 .modal {
   position: relative;
   display: grid;
@@ -369,12 +368,12 @@ button.secondary {
   box-shadow: 0 25px 90px #000a;
   animation: modalIn 200ms ease-out;
 }
- 
+
 .modal-art {
   display: flex;
   align-items: center;
 }
- 
+
 .modal-art img {
   display: block;
   width: 100%;
@@ -382,28 +381,28 @@ button.secondary {
   object-fit: contain;
   border-radius: 10px;
 }
- 
+
 .modal-info {
   align-self: center;
   min-width: 0;
 }
- 
+
 .modal-info h2 {
   margin: 12px 0;
   overflow-wrap: anywhere;
 }
- 
+
 .modal-info .modal-description {
   color: #bdcce0;
   white-space: pre-line;
 }
- 
+
 .modal-info .modal-count {
   margin-top: 20px;
   color: #9ee8fa;
   font-weight: 700;
 }
- 
+
 .modal-close {
   position: absolute;
   z-index: 1;
@@ -419,11 +418,11 @@ button.secondary {
   font-size: 1.4rem;
   box-shadow: none;
 }
- 
+
 .modal-close:hover {
   background: #344766;
 }
- 
+
 @keyframes modalIn {
   from {
     opacity: 0;
@@ -434,7 +433,7 @@ button.secondary {
     transform: translateY(0) scale(1);
   }
 }
- 
+
 @media (max-width: 520px) {
   .modal {
     grid-template-columns: 1fr;
@@ -442,64 +441,64 @@ button.secondary {
     padding: 18px;
     padding-top: 52px;
   }
- 
+
   .modal-art img {
     max-height: 42vh;
   }
- 
+
   .modal-info h2 {
     margin-top: 4px;
   }
 }
- 
+
 @media (prefers-reduced-motion: reduce) {
   .modal {
     animation: none;
   }
 }
- 
- 
- 
+
+
+
 /* Mystery card selection */
 .card.mystery {
   cursor: pointer;
   overflow: hidden;
 }
- 
+
 .card.mystery img {
   filter: blur(12px);
   transform: scale(1.08);
   transition: filter 250ms ease, transform 250ms ease;
 }
- 
+
 .card.mystery:hover img,
 .card.mystery:focus-visible img {
   transform: scale(1.12);
 }
- 
+
 .card.mystery.rarity-common img {
   filter: blur(12px) sepia(0.25);
 }
- 
+
 .card.mystery.rarity-rare img {
   filter: blur(12px) sepia(0.25);
 }
- 
+
 .card.mystery.rarity-legendary img {
   filter: blur(12px) sepia(0.25);
 }
- 
+
 .card.mystery:hover {
   border-color: var(--accent);
   box-shadow: 0 0 22px #72e0f555;
 }
- 
+
 .card.mystery h3,
 .card.mystery .rarity,
 .card.mystery .description {
   display: none;
 }
- 
+
 .card.mystery::after {
   content: "?";
   position: absolute;
@@ -512,23 +511,23 @@ button.secondary {
   text-shadow: 0 0 18px #72e0f5;
   pointer-events: none;
 }
- 
+
 .card.mystery {
   min-height: 180px;
 }
- 
- 
+
+
 /* Collection layout: separate sections, horizontal flowing cards */
 #collection {
   display: block;
 }
- 
+
 #collection > .collection-type {
   display: block;
   width: 100%;
   margin: 28px 0;
 }
- 
+
 #collection .collection-type-heading {
   display: block;
   width: 100%;
@@ -539,7 +538,7 @@ button.secondary {
   color: var(--accent);
   border-bottom: 1px solid #30425d;
 }
- 
+
 #collection .collection-type-grid {
   display: flex;
   flex-direction: row;
@@ -549,27 +548,27 @@ button.secondary {
   gap: 14px;
   width: 100%;
 }
- 
+
 #collection .collection-type-grid > .card {
   flex: 0 0 98px;
   width: 98px;
   max-width: 98px;
   min-width: 0;
 }
- 
+
 @media (max-width: 480px) {
   #collection .collection-type-grid {
     gap: 9px;
   }
- 
+
   #collection .collection-type-grid > .card {
     flex: 0 0 calc((100% - 18px) / 3);
     width: auto;
     max-width: none;
   }
 }
- 
- 
+
+
 /* Type headings with logos */
 #collection .collection-type-heading {
   display: flex;
@@ -577,7 +576,7 @@ button.secondary {
   justify-content: flex-start;
   gap: 12px;
 }
- 
+
 #collection .type-logo {
   display: block;
   width: 36px;
@@ -586,10 +585,10 @@ button.secondary {
   flex: 0 0 36px;
   transform: rotate(-90deg);
 }
- 
- 
+
+
 /* ===================== Game mode ===================== */
- 
+
 /* View tabs */
 .view-tabs {
   display: flex;
@@ -598,27 +597,27 @@ button.secondary {
   padding: 14px 16px 0;
   flex-wrap: wrap;
 }
- 
+
 .view-tabs .tab {
   background: #16233a;
   color: var(--muted);
   border: 1px solid #30425d;
   box-shadow: none;
 }
- 
+
 .view-tabs .tab[aria-pressed="true"] {
   background: var(--accent);
   color: #171126;
   border-color: var(--accent);
 }
- 
+
 .play-intro {
   max-width: 720px;
   margin: 0 auto;
   text-align: center;
   color: var(--muted);
 }
- 
+
 /* Score bar */
 .game-hud {
   display: flex;
@@ -627,7 +626,7 @@ button.secondary {
   gap: 10px;
   margin: 8px 0 12px;
 }
- 
+
 .game-hud > div {
   min-width: 92px;
   padding: 8px 14px;
@@ -636,7 +635,7 @@ button.secondary {
   border: 1px solid #30425d;
   border-radius: 12px;
 }
- 
+
 .game-hud span {
   display: block;
   font-size: 0.72rem;
@@ -644,18 +643,18 @@ button.secondary {
   text-transform: uppercase;
   color: var(--muted);
 }
- 
+
 .game-hud strong {
   font-size: 1.35rem;
   color: var(--accent);
 }
- 
+
 #game-status {
   min-height: 24px;
   text-align: center;
   color: var(--muted);
 }
- 
+
 .selection-bar {
   display: flex;
   align-items: center;
@@ -669,19 +668,19 @@ button.secondary {
   border: 1px solid var(--accent);
   border-radius: 12px;
 }
- 
+
 .selection-bar[hidden] { display: none; }
- 
+
 .selection-buttons { display: flex; gap: 8px; }
 .selection-buttons button { padding: 7px 14px; font-size: 0.9rem; }
- 
+
 .zone-title {
   margin: 26px 0 12px;
   padding-bottom: 8px;
   color: var(--accent);
   border-bottom: 1px solid #30425d;
 }
- 
+
 /* Game cards */
 .game-card {
   --w: 124px;
@@ -690,7 +689,7 @@ button.secondary {
   border-radius: 11px;
   user-select: none;
 }
- 
+
 .gc-head,
 .gc-foot {
   display: flex;
@@ -700,16 +699,16 @@ button.secondary {
   font-size: 0.72rem;
   line-height: 1.2;
 }
- 
+
 .gc-head { height: 24px; font-weight: 750; }
- 
+
 .gc-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
- 
+
 .gc-degree,
 .gc-reach {
   flex: 0 0 auto;
@@ -717,19 +716,19 @@ button.secondary {
   border-radius: 20px;
   font-weight: 800;
 }
- 
+
 .gc-degree { background: #26354c; color: #e1ecff; }
 .gc-degree::before { content: "deg "; font-weight: 500; opacity: 0.7; }
 .gc-reach { background: #123a46; color: #9ee8fa; }
 .gc-reach::before { content: "reach "; font-weight: 500; opacity: 0.7; }
- 
+
 .game-card img {
   margin-top: 4px;
   border-radius: 7px;
 }
- 
+
 .gc-foot { margin-top: 5px; color: var(--muted); }
- 
+
 .gc-type {
   display: flex;
   align-items: center;
@@ -740,7 +739,7 @@ button.secondary {
   text-overflow: ellipsis;
   font-size: 0.66rem;
 }
- 
+
 .gc-type-logo {
   width: 14px !important;
   height: 14px;
@@ -749,7 +748,7 @@ button.secondary {
   background: none !important;
   transform: rotate(-90deg);
 }
- 
+
 /* Hand */
 .hand {
   display: flex;
@@ -758,18 +757,18 @@ button.secondary {
   gap: 14px;
   min-height: 120px;
 }
- 
+
 .hand .game-card { cursor: pointer; }
- 
+
 .hand .game-card.selected {
   transform: translateY(-12px);
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent), 0 14px 30px #0008, 0 0 24px #72e0f566;
 }
- 
+
 .hand .game-card.no-move { opacity: 0.55; }
 .hand .game-card.no-move.selected { opacity: 1; }
- 
+
 /* Board */
 .board {
   display: flex;
@@ -778,7 +777,7 @@ button.secondary {
   align-items: flex-start;
   gap: 18px;
 }
- 
+
 .slot {
   --offset: 34px;
   display: flex;
@@ -791,43 +790,43 @@ button.secondary {
   border: 1px solid transparent;
   transition: border-color 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
 }
- 
+
 .slot.empty-slot {
   justify-content: center;
   border: 2px dashed #30425d;
   color: var(--muted);
   font-size: 0.9rem;
 }
- 
+
 .slot.valid-target {
   cursor: pointer;
   border: 2px dashed var(--accent);
   box-shadow: 0 0 22px #72e0f533;
   animation: targetPulse 1.4s ease-in-out infinite;
 }
- 
+
 .slot.valid-target.empty-slot { color: var(--accent); }
 .slot.invalid-target { opacity: 0.45; cursor: not-allowed; }
- 
+
 @keyframes targetPulse {
   50% { box-shadow: 0 0 32px #72e0f566; }
 }
- 
+
 /* Stacked cards: all in the same grid cell, each shifted down a bit. */
 .stack {
   display: grid;
 }
- 
+
 .stack > .game-card {
   grid-area: 1 / 1;
   margin-top: calc(var(--i) * var(--offset));
   box-shadow: 0 -4px 12px #0006;
   cursor: pointer;
 }
- 
+
 .stack > .game-card:hover { transform: none; }
 .stack > .game-card.top { box-shadow: 0 -4px 14px #0008, 0 0 14px #72e0f522; }
- 
+
 .stack-info {
   display: flex;
   flex-direction: column;
@@ -837,17 +836,17 @@ button.secondary {
   color: var(--muted);
   text-align: center;
 }
- 
+
 .stack-info strong { color: var(--accent); font-size: 0.95rem; }
- 
+
 #play-view .empty { width: 100%; }
- 
+
 .modal-info .modal-stats {
   margin: 0 0 12px;
   color: #9ee8fa;
   font-weight: 650;
 }
- 
+
 @media (max-width: 480px) {
   .game-card { --w: 100px; }
   .slot { width: 114px; min-height: 210px; --offset: 30px; padding: 5px; }
@@ -855,12 +854,12 @@ button.secondary {
   .hand { gap: 9px; }
   .gc-degree::before, .gc-reach::before { content: ""; }
 }
- 
+
 @media (prefers-reduced-motion: reduce) {
   .slot.valid-target { animation: none; }
 }
- 
- 
+
+
 /* ===================== Work force & costs ===================== */
 .zone-title small {
   margin-left: 8px;
@@ -868,7 +867,7 @@ button.secondary {
   font-weight: 500;
   color: var(--muted);
 }
- 
+
 .wf-board {
   display: flex;
   flex-wrap: wrap;
@@ -882,34 +881,34 @@ button.secondary {
   background: #0c1626;
   transition: border-color 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
 }
- 
+
 .wf-board .game-card { --w: 104px; }
 .wf-board .game-card:hover { transform: none; }
- 
+
 .wf-empty {
   align-self: center;
   margin: 0;
   color: var(--muted);
   font-size: 0.9rem;
 }
- 
+
 .wf-board.valid-target {
   cursor: pointer;
   border-color: #f5c56b;
   box-shadow: 0 0 22px #f5c56b33;
   animation: wfPulse 1.4s ease-in-out infinite;
 }
- 
+
 .wf-board.valid-target .wf-empty { color: #f5c56b; }
 .wf-board.invalid-target { opacity: 0.5; cursor: not-allowed; }
- 
+
 @keyframes wfPulse {
   50% { box-shadow: 0 0 32px #f5c56b66; }
 }
- 
+
 /* Cost badge on the card art */
 .gc-art { position: relative; }
- 
+
 .gc-cost {
   position: absolute;
   top: 9px;
@@ -927,7 +926,7 @@ button.secondary {
   font-weight: 800;
   box-shadow: 0 2px 8px #0009;
 }
- 
+
 /* Work force cards */
 .gc-wf {
   flex: 0 0 auto;
@@ -937,26 +936,26 @@ button.secondary {
   color: #ffe2a3;
   font-weight: 800;
 }
- 
+
 .game-card.wf-card { border-color: #b48a3c; }
 .game-card.wf-permanent .gc-type { color: #f5c56b; font-weight: 700; }
 .game-card.wf-single .gc-type { color: #d9c49a; font-style: italic; }
- 
+
 .hand .game-card.resource {
   border-style: dashed;
   border-color: #f5c56b;
 }
- 
+
 @media (max-width: 480px) {
   .wf-board .game-card { --w: 88px; }
   .game-hud > div { min-width: 78px; padding: 6px 10px; }
 }
- 
+
 @media (prefers-reduced-motion: reduce) {
   .wf-board.valid-target { animation: none; }
 }
- 
- 
+
+
 /* ===================== Bare cards on the boards =====================
    On the main board and the work force board, show only the card image:
    no frame, no name/degree/reach strips. Cards in the hand keep them. */
@@ -967,20 +966,20 @@ button.secondary {
   background: none;
   box-shadow: 0 -3px 12px #000a;
 }
- 
+
 .board .stack > .game-card .gc-head,
 .board .stack > .game-card .gc-foot,
 .wf-board .game-card .gc-head,
 .wf-board .game-card .gc-foot {
   display: none;
 }
- 
+
 .board .stack > .game-card img,
 .wf-board .game-card img {
   margin-top: 0;
 }
- 
- 
+
+
 /* ===================== Hover highlight on game cards =====================
    Same feel as the buttons: slight lift, brightness and a neutral shadow
    (no cyan). */
@@ -991,7 +990,7 @@ button.secondary {
     filter 180ms ease,
     border-color 180ms ease;
 }
- 
+
 .hand .game-card:hover,
 .hand .game-card:focus-visible {
   transform: translateY(-4px);
@@ -1000,35 +999,35 @@ button.secondary {
   box-shadow: 0 10px 25px #000a;
   outline: none;
 }
- 
+
 .hand .game-card.rarity-rare:hover { border-color: #a78bfa; }
 .hand .game-card.rarity-legendary:hover { border-color: #e9bd68; }
 .hand .game-card.wf-card:hover { border-color: #b48a3c; }
 .hand .game-card.resource:hover { border-color: #f5c56b; }
- 
+
 .hand .game-card.selected:hover,
 .hand .game-card.selected:focus-visible {
   transform: translateY(-12px);
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent), 0 14px 30px #0008;
 }
- 
+
 .hand .game-card.no-move:hover { opacity: 0.8; }
- 
+
 .board .stack > .game-card:hover,
 .wf-board .game-card:hover {
   transform: translateY(-2px);
   filter: brightness(1.12);
   box-shadow: 0 -3px 12px #000a, 0 10px 25px #000a;
 }
- 
- 
+
+
 /* ===================== Items & robustness ===================== */
 .game-card.item-card { border-color: #b0607a; }
 .game-card.item-card .gc-type { color: #f0a6be; font-weight: 700; }
 .game-card.item-single .gc-type { font-style: italic; font-weight: 600; }
 .hand .game-card.rarity-common.item-card:hover { border-color: #b0607a; }
- 
+
 /* Board cards targeted by an item */
 .board .stack > .game-card.item-target {
   cursor: crosshair;
@@ -1037,7 +1036,7 @@ button.secondary {
 }
 .board .stack > .game-card.item-invalid { filter: brightness(0.55); cursor: not-allowed; }
 .board .stack > .game-card.item-invalid:hover { filter: brightness(0.65); }
- 
+
 /* Attached items + current robustness, in the visible top strip of a board card */
 .gc-attached {
   position: absolute;
@@ -1049,7 +1048,7 @@ button.secondary {
   gap: 3px;
   pointer-events: none;
 }
- 
+
 .gc-item-chip {
   width: 24px !important;
   height: 24px;
@@ -1061,7 +1060,7 @@ button.secondary {
   pointer-events: auto;
   cursor: pointer;
 }
- 
+
 .gc-rob {
   margin-left: auto;
   padding: 2px 7px;
@@ -1077,20 +1076,20 @@ button.secondary {
 .gc-rob.down { background: #4a1621f0; color: #ffb3c0; }
 .gc-rob { white-space: nowrap; flex: 0 0 auto; }
 .gc-item-chip + .gc-item-chip { margin-left: -9px; }
- 
+
 /* Hover on attached item icons: same effect as the cards */
 .gc-item-chip {
   position: relative;
   transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
 }
- 
+
 .gc-item-chip:hover {
   z-index: 1;
   transform: translateY(-2px);
   filter: brightness(1.12);
   box-shadow: 0 2px 6px #000a, 0 10px 25px #000a;
 }
- 
+
 /* Work force cards targeted by an item, and their budget badge */
 .wf-board .game-card.item-target {
   cursor: crosshair;
@@ -1100,4 +1099,19 @@ button.secondary {
 .wf-board .game-card.item-invalid { filter: brightness(0.55); cursor: not-allowed; }
 .wf-board .game-card.item-invalid:hover { filter: brightness(0.65); }
 .gc-rob.budget::before { content: "budget "; }
- 
+
+/* Conditional effects */
+.gc-attached .gc-spacer { margin-left: auto; }
+.gc-attached .gc-rob { margin-left: 0; }
+.gc-rob.reach::before { content: "reach "; }
+.board .stack > .game-card.effect-on,
+.wf-board .game-card.effect-on {
+  box-shadow: 0 -3px 12px #000a, 0 0 0 2px #e9bd68, 0 0 16px #e9bd6855;
+}
+
+/* Hand cards whose effect is active */
+.hand .game-card.effect-on {
+  outline: 2px solid #e9bd68;
+  outline-offset: 2px;
+}
+.hand .game-card.effect-on:focus-visible { outline: 2px solid #e9bd68; }
