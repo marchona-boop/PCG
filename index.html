@@ -63,8 +63,29 @@
       Some cards have <strong>effects</strong> that switch on when another card in the same
       stack (or on the work force board) has a matching name. Cards in your hand check the
       whole board instead. Cards with an active effect are outlined in gold.
-      Your score is the total reach on the board.
+      Your score is the total reach on the board. Online, players alternate turns for
+      10 rounds; items can also target your opponent's cards.
     </p>
+
+    <details class="versus-panel" id="versus-panel" open>
+      <summary>Play against someone online</summary>
+      <div class="versus-row">
+        <label>Your name <input id="player-name" type="text" maxlength="24" placeholder="e.g. Marie"></label>
+      </div>
+      <div class="versus-row">
+        <button id="host-game" type="button" class="secondary">Host an online game</button>
+        <span class="versus-or">or join with a code</span>
+        <input id="join-code" type="text" maxlength="40" placeholder="code" aria-label="Game code">
+        <button id="join-game" type="button" class="secondary">Join</button>
+        <button id="leave-game" type="button" class="secondary">Leave</button>
+      </div>
+      <div id="invite" class="versus-row invite" hidden>
+        <span>Send this link to your opponent (code <strong id="invite-code"></strong>):</span>
+        <input id="invite-link" type="text" readonly aria-label="Invitation link">
+        <button id="copy-invite" type="button" class="secondary">Copy link</button>
+      </div>
+      <p id="net-status" class="net-status" role="status" aria-live="polite"></p>
+    </details>
 
     <div class="controls">
       <button id="new-game" type="button">New game</button>
@@ -74,13 +95,16 @@
 
     <div class="game-hud" aria-live="polite">
       <div><span>Score</span><strong id="hud-score">0</strong></div>
-      <div><span>Best</span><strong id="hud-best">0</strong></div>
+      <div id="hud-opp-box" hidden><span>Opponent</span><strong id="hud-opp">0</strong></div>
+      <div id="hud-round-box" hidden><span>Round</span><strong id="hud-round">0</strong></div>
+      <div id="hud-best-box"><span>Best</span><strong id="hud-best">0</strong></div>
       <div><span>Turn</span><strong id="hud-turn">0</strong></div>
       <div><span>Deck</span><strong id="hud-deck">0</strong></div>
       <div><span>Work force</span><strong id="hud-wf">0</strong></div>
       <div><span>In hand</span><strong id="hud-wf-hand">+0</strong></div>
     </div>
 
+    <p id="turn-banner" class="turn-banner" hidden></p>
     <p id="game-status" role="status" aria-live="polite"></p>
 
     <div id="selection-bar" class="selection-bar" hidden>
@@ -92,10 +116,16 @@
       </div>
     </div>
 
-    <h3 class="zone-title">Work force <small id="wf-summary"></small></h3>
+    <section id="opponent-zone" class="opponent-zone" hidden aria-label="Opponent">
+      <h3 class="zone-title opp-title"><span id="opp-title">Opponent</span> <small id="opp-summary"></small></h3>
+      <div id="opp-wf-board" class="wf-board opp"></div>
+      <div id="opp-board" class="board opp"></div>
+    </section>
+
+    <h3 class="zone-title"><span id="my-zone-title">Work force</span> <small id="wf-summary"></small></h3>
     <div id="wf-board" class="wf-board"></div>
 
-    <h3 class="zone-title">Board</h3>
+    <h3 class="zone-title" id="my-board-title">Board</h3>
     <div id="board" class="board"></div>
 
     <h3 class="zone-title">Your hand</h3>
@@ -141,7 +171,7 @@
 <footer>Your collection is saved locally in this browser.</footer>
 
 <script type="module" src="script.js"></script>
-<script type="module" src="game.js?v=2026-10-25d"></script>
+<script type="module" src="game.js?v=2026-10-26-versus"></script>
 
 </body>
 </html>

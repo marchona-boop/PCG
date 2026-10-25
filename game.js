@@ -42,10 +42,16 @@
 // - Score = sum of the reach of every card on the main board.
 // - The game ends when your hand is empty, when the deck is empty and no card
 //   can be played, or when you press "End game".
+// - Two-player games ("Play against someone online"): one player hosts and
+//   sends an invitation link, the other joins. Each plays from their own
+//   collection; players alternate turns for VERSUS_ROUNDS rounds and the
+//   highest total reach wins. Items can target cards on either side.
+//   Connection: PeerJS (browser to browser; peerjs.min.js must sit next to
+//   index.html). Add ?local=1 to the address to test with two tabs instead.
 
 import { cards, typeInfo, collection, openCardInspection } from "./script.js";
 
-const GAME_VERSION = "2026-10-25d";
+const GAME_VERSION = "2026-10-26-versus";
 
 // ---- Tunable settings -------------------------------------------------------
 const HAND_SIZE = 5;          // cards in hand at the start
@@ -59,6 +65,10 @@ const BUDGET_FIELD = "budget";
 const IMPROVE_BUDGET_FIELD = "improve budget";
 const WF_PLACEMENTS_PER_TURN = 1; // permanent work force cards placeable per turn
 const BEST_KEY = "my-gacha-best-score-v1";
+const VERSUS_ROUNDS = 10;     // rounds in a two-player game (each player plays once per round)
+const PEER_PREFIX = "physics-card-game-";  // PeerJS ids are this + the room code
+// PeerJS 1.5.4 (MIT licence): local copy first, CDN as a fallback.
+const PEERJS_URLS = ["peerjs.min.js", "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"];
 // -----------------------------------------------------------------------------
 
 const $ = id => document.getElementById(id);
@@ -104,7 +114,7 @@ const isHybridWf = card => isPlayCard(card) && typesOf(card).has(normType(WORKFO
 const isBenchItem = card =>
   isItem(card) && isPermanent(card) && typesOf(card).has(normType(WORKFORCE_TYPE));
 const canJoinBench = card => isPermanentWf(card) || isHybridWf(card) || isBenchItem(card);
-const onBench = inst => !!game && game.wfBoard.includes(inst);
+const onBench = inst => states().some(st => st.wfBoard.includes(inst));
 const isSingleUseWf = card => isWorkforce(card) && !isPermanent(card);
 const isItem = card => normType(card.type) === normType(ITEM_TYPE);
 const isPlayCard = card => !isWorkforce(card) && !isItem(card);
@@ -168,10 +178,21 @@ function conditionsOf(card) {
 
 // The group a board card belongs to: its stack, or the whole work force board.
 function groupOf(inst) {
-  if (!game) return null;
-  for (const stack of game.stacks) if (stack && stack.includes(inst)) return stack;
-  if (game.wfBoard.includes(inst)) return game.wfBoard;
+  for (const st of states()) {
+    for (const stack of st.stacks) if (stack && stack.includes(inst)) return stack;
+    if (st.wfBoard.includes(inst)) return st.wfBoard;
+  }
   return null;
+}
+
+// Both players' states (just yours in solo mode).
+function states() {
+  return [game, opp].filter(Boolean);
+}
+
+// The player who owns a card instance (the uid starts with the player's side).
+function ownerOf(inst) {
+  return opp && String(inst.uid)[0] === opp.side ? opp : game;
 }
 
 // Is this board card's effect currently active?
@@ -197,10 +218,11 @@ function effectActive(inst) {
 // both boards.
 function looseEffectActive(inst) {
   const base = inst.base;
-  if (!game || !effectsOf(base).length) return false;
+  const owner = ownerOf(inst);
+  if (!owner || !effectsOf(base).length) return false;
   const conds = conditionsOf(base);
   if (!conds.length) return true;
-  const onBoards = [...game.stacks.flatMap(st => st || []), ...game.wfBoard];
+  const onBoards = [...owner.stacks.flatMap(st => st || []), ...owner.wfBoard];
   return onBoards.some(other => other !== inst && nameMatches(other, conds));
 }
 
@@ -221,8 +243,8 @@ function effectiveCard(inst) {
 // Card instances: `base` is the card from cards_data.json; `card` gives the
 // base card while the instance is on a board (board effects are added by the
 // stat functions), and the effect-adjusted card everywhere else.
-function makeInst(card) {
-  const inst = { uid: ++uidCounter, base: card };
+function makeInst(card, uid = mySide + ++uidCounter) {
+  const inst = { uid, base: card };
   Object.defineProperty(inst, "card", {
     enumerable: true,
     get() { return groupOf(inst) ? inst.base : effectiveCard(inst); }
@@ -310,7 +332,10 @@ function saveBest(n) {
 }
 
 // ---- Game state -------------------------------------------------------------
-let game = null;
+let game = null;        // your state: deck, hand, boards...
+let opp = null;         // opponent's state (two-player games only)
+let match = null;       // null in solo; { me, turn, round, rounds, names, over, ... } in versus
+let mySide = "s";       // uid prefix of the cards you create ("s" solo, "a" host, "b" guest)
 let selected = null;    // index in game.hand, or null
 let best = loadBest();
 let uidCounter = 0;
@@ -331,7 +356,10 @@ function newGame() {
   }
 
   const deck = shuffle(pool).slice(0, DECK_SIZE);
+  match = null;
+  opp = null;
   game = {
+    side: mySide,
     deck,
     hand: deck.splice(0, HAND_SIZE),
     stacks: Array(BOARD_SLOTS).fill(null),
@@ -353,7 +381,7 @@ function newGame() {
 }
 
 // ---- Work force & payment ---------------------------------------------------
-const boardWfTotal = () => Math.max(0, game.wfBoard.reduce((s, inst) => s + boardWorkforce(inst), 0));
+const boardWfTotal = (st = game) => Math.max(0, st.wfBoard.reduce((s, inst) => s + boardWorkforce(inst), 0));
 const boardWfAvailable = () => Math.max(0, boardWfTotal() - game.wfSpent);
 const handWfInsts = () => game.hand.filter(inst => isSingleUseWf(inst.card));
 const handWfTotal = () => handWfInsts().reduce((s, inst) => s + workforceOf(inst.card), 0);
@@ -462,14 +490,17 @@ function canUseItemOn(item, inst) {
 
 function itemTargets(item) {
   const out = [];
-  game.stacks.forEach((stack, slot) => {
-    (stack || []).forEach((inst, index) => {
-      if (canUseItemOn(item, inst)) out.push({ kind: "stack", slot, index });
+  for (const st of states()) {
+    const side = st === game ? "me" : "opp";
+    st.stacks.forEach((stack, slot) => {
+      (stack || []).forEach((inst, index) => {
+        if (canUseItemOn(item, inst)) out.push({ side, kind: "stack", slot, index });
+      });
     });
-  });
-  game.wfBoard.forEach((inst, index) => {
-    if (canUseItemOn(item, inst)) out.push({ kind: "wf", index });
-  });
+    st.wfBoard.forEach((inst, index) => {
+      if (canUseItemOn(item, inst)) out.push({ side, kind: "wf", index });
+    });
+  }
   return out;
 }
 
@@ -498,8 +529,8 @@ function stackReach(stack) {
   return stack ? stack.reduce((sum, inst) => sum + boardReach(inst), 0) : 0;
 }
 
-function totalScore() {
-  return game ? game.stacks.reduce((sum, s) => sum + stackReach(s), 0) : 0;
+function totalScore(st = game) {
+  return st ? st.stacks.reduce((sum, s) => sum + stackReach(s), 0) : 0;
 }
 
 // ---- Actions ----------------------------------------------------------------
@@ -545,12 +576,12 @@ function playTo(slot) {
   endTurn(message);
 }
 
-function useItemOn(slot, index) {
-  useItem({ kind: "stack", slot, index });
+function useItemOn(slot, index, side = "me") {
+  useItem({ side, kind: "stack", slot, index });
 }
 
-function useItemOnWorkforce(index) {
-  useItem({ kind: "wf", index });
+function useItemOnWorkforce(index, side = "me") {
+  useItem({ side, kind: "wf", index });
 }
 
 function useItem(where) {
@@ -558,8 +589,10 @@ function useItem(where) {
   const itemInst = selectedInst();
   if (!itemInst || !isItem(itemInst.card)) return;
   const item = itemInst.card;
-  const stack = where.kind === "stack" ? game.stacks[where.slot] : null;
-  const target = where.kind === "stack" ? stack && stack[where.index] : game.wfBoard[where.index];
+  const st = where.side === "opp" && opp ? opp : game;
+  const whose = st === game ? "" : `${opponentName()}'s `;
+  const stack = where.kind === "stack" ? st.stacks[where.slot] : null;
+  const target = where.kind === "stack" ? stack && stack[where.index] : st.wfBoard[where.index];
   if (!target) return;
 
   const plan = paymentPlan(costOf(item));
@@ -585,29 +618,29 @@ function useItem(where) {
   if (isPermanent(item)) {
     target.items = target.items || [];
     target.items.push(itemInst);
-    message = `${item.name} attached to ${target.card.name}: ${stat.label} ` +
+    message = `${item.name} attached to ${whose}${target.card.name}: ${stat.label} ` +
       `${formatStat(stat.now)} → ${formatStat(itemStatFor(item, target).now)}.`;
   } else {
     game.itemsUsed++;
-    message = `Used ${item.name} on ${target.card.name}.`;
+    message = `Used ${item.name} on ${whose}${target.card.name}.`;
   }
 
   const current = itemStatFor(item, target).now;
   if (!isPermanent(item) || current <= 0) {
-    const scoreBefore = totalScore();
-    const wfBefore = boardWfTotal();
+    const scoreBefore = totalScore(st);
+    const wfBefore = boardWfTotal(st);
     if (where.kind === "stack") {
       const destroyed = stack.splice(where.index);
-      if (!stack.length) game.stacks[where.slot] = null;
-      game.destroyed += destroyed.length;
-      const lost = scoreBefore - totalScore();
+      if (!stack.length) st.stacks[where.slot] = null;
+      st.destroyed += destroyed.length;
+      const lost = scoreBefore - totalScore(st);
       message += destroyed.length > 1
         ? ` ${target.card.name} and the ${destroyed.length - 1} card(s) stacked on it were destroyed (−${formatStat(lost)} reach).`
         : ` ${target.card.name} was destroyed (−${formatStat(lost)} reach).`;
     } else {
-      game.wfBoard.splice(where.index, 1);
-      game.destroyed++;
-      message += ` ${target.card.name} was destroyed (−${formatStat(wfBefore - boardWfTotal())} work force per turn).`;
+      st.wfBoard.splice(where.index, 1);
+      st.destroyed++;
+      message += ` ${target.card.name} was destroyed (−${formatStat(wfBefore - boardWfTotal(st))} work force per turn).`;
     }
   }
   if (plan.cost > 0) message += ` (${describePayment(plan)})`;
@@ -644,6 +677,7 @@ function placeWorkforce() {
   if (plan.cost > 0) message += ` (${describePayment(plan)})`;
   render();
   setStatus(message + " Now play a card, pass or discard.");
+  if (match) sendState(message);
   checkStuck();
 }
 
@@ -657,7 +691,8 @@ function discardSelected() {
 }
 
 function passTurn() {
-  if (!game || game.over || !game.deck.length) return;
+  if (!game || game.over || (!match && !game.deck.length)) return;
+  if (match && !myTurn()) return;
   endTurn("You passed.");
 }
 
@@ -678,6 +713,20 @@ function endTurn(message) {
   game.wfPlaced = 0;
   game.turn++;
 
+  if (match) {
+    // Two-player game: hand over to the opponent; a round ends after player 2.
+    if (match.turn === 1) match.round++;
+    match.turn = 1 - match.turn;
+    if (match.round > match.rounds) {
+      finishMatch(message);
+      return;
+    }
+    render();
+    setStatus(message + ` — ${opponentName()}'s turn.`);
+    sendState(message);
+    return;
+  }
+
   render();
   setStatus(message);
   checkStuck(message);
@@ -691,28 +740,31 @@ function resolveDestruction() {
   const notes = [];
   for (let guard = 0; guard < 200; guard++) {
     let hit = false;
-    for (let slot = 0; slot < game.stacks.length && !hit; slot++) {
-      const stack = game.stacks[slot];
-      if (!stack) continue;
-      const index = stack.findIndex(inst => robustnessOf(inst) <= 0);
-      if (index === -1) continue;
-      const name = stack[index].card.name;
-      const destroyed = stack.splice(index);
-      if (!stack.length) game.stacks[slot] = null;
-      game.destroyed += destroyed.length;
-      notes.push(destroyed.length > 1
-        ? `${name} and ${destroyed.length - 1} card(s) on it collapsed`
-        : `${name} collapsed`);
-      hit = true;
-    }
-    if (!hit) {
-      const index = game.wfBoard.findIndex(inst => budgetOf(inst) <= 0);
-      if (index !== -1) {
-        notes.push(`${game.wfBoard[index].card.name} ran out of budget`);
-        game.wfBoard.splice(index, 1);
-        game.destroyed++;
+    for (const st of states()) {
+      for (let slot = 0; slot < st.stacks.length && !hit; slot++) {
+        const stack = st.stacks[slot];
+        if (!stack) continue;
+        const index = stack.findIndex(inst => robustnessOf(inst) <= 0);
+        if (index === -1) continue;
+        const name = stack[index].card.name;
+        const destroyed = stack.splice(index);
+        if (!stack.length) st.stacks[slot] = null;
+        st.destroyed += destroyed.length;
+        notes.push(destroyed.length > 1
+          ? `${name} and ${destroyed.length - 1} card(s) on it collapsed`
+          : `${name} collapsed`);
         hit = true;
       }
+      if (!hit) {
+        const index = st.wfBoard.findIndex(inst => budgetOf(inst) <= 0);
+        if (index !== -1) {
+          notes.push(`${st.wfBoard[index].card.name} ran out of budget`);
+          st.wfBoard.splice(index, 1);
+          st.destroyed++;
+          hit = true;
+        }
+      }
+      if (hit) break;
     }
     if (!hit) break;
   }
@@ -721,7 +773,7 @@ function resolveDestruction() {
 
 // End the game automatically when nothing more can happen.
 function checkStuck(lastMessage = "") {
-  if (!game || game.over) return;
+  if (!game || game.over || match) return; // two-player games end after the last round
   const prefix = lastMessage ? lastMessage + " " : "";
   if (!game.hand.length) {
     finishGame(prefix + "Your hand is empty.");
@@ -828,15 +880,45 @@ function makeActivatable(el, label, onActivate) {
 }
 
 function render() {
+  if (match && !myTurn()) selected = null;
   renderHud();
   renderWorkforceBoard();
   renderBoard();
+  renderOpponent();
   renderHand();
   renderSelectionBar();
   const active = game && !game.over;
-  $("end-game").disabled = !active;
-  $("pass-turn").disabled = !active || !game.deck.length;
-  $("new-game").textContent = active ? "Restart" : "New game";
+  const inMatch = match && !match.over;
+  $("end-game").disabled = !active || !!match;
+  $("pass-turn").disabled = !active || (match ? !myTurn() : !game.deck.length);
+  $("new-game").disabled = !!inMatch;
+  $("new-game").textContent = active && !match ? "Restart" : "New game";
+  $("host-game").disabled = !!inMatch || netBusy;
+  $("join-game").disabled = !!inMatch || netBusy;
+}
+
+function renderOpponent() {
+  const zone = $("opponent-zone");
+  zone.hidden = !match || !opp;
+  $("hud-round-box").hidden = !match;
+  $("hud-opp-box").hidden = !match;
+  $("hud-best-box").hidden = !!match;
+  $("my-zone-title").textContent = match ? "Your work force" : "Work force";
+  $("my-board-title").textContent = match ? "Your board" : "Board";
+  if (!match || !opp) return;
+  renderWorkforceBoard(opp, $("opp-wf-board"), "opp");
+  renderBoard(opp, $("opp-board"), "opp");
+  $("opp-title").textContent = opponentName();
+  $("opp-summary").textContent =
+    `score ${formatStat(totalScore(opp))} · work force ${formatStat(boardWfTotal(opp))}` +
+    ` · ${opp.hand.length} card(s) in hand · deck ${opp.deck.length}`;
+  $("hud-round").textContent = `${Math.min(match.round, match.rounds)}/${match.rounds}`;
+  $("hud-opp").textContent = formatStat(totalScore(opp));
+  $("turn-banner").hidden = false;
+  $("turn-banner").className = "turn-banner " + (match.over ? "over" : myTurn() ? "mine" : "theirs");
+  $("turn-banner").textContent = match.over
+    ? matchResultText()
+    : myTurn() ? "Your turn" : `${opponentName()}'s turn — waiting…`;
 }
 
 function renderHud() {
@@ -850,28 +932,27 @@ function renderHud() {
   $("hud-wf-hand").textContent = game ? "+" + formatStat(handWfTotal()) : "+0";
 }
 
-function renderWorkforceBoard() {
-  const zone = $("wf-board");
+function renderWorkforceBoard(st = game, zone = $("wf-board"), side = "me") {
   zone.replaceChildren();
-  zone.className = "wf-board";
+  zone.className = "wf-board" + (side === "opp" ? " opp" : "");
 
   const inst = selectedInst();
-  const placing = inst && canJoinBench(inst.card);
+  const placing = side === "me" && inst && canJoinBench(inst.card);
   const ok = placing && canPlaceWorkforce() && canAfford(inst.card);
   if (placing) zone.classList.add(ok ? "valid-target" : "invalid-target");
   const selItem = inst && isItem(inst.card) ? inst.card : null;
   const affordable = selItem ? canAfford(selItem) : false;
 
-  if (!game || !game.wfBoard.length) {
+  if (!st || !st.wfBoard.length) {
     const empty = document.createElement("p");
     empty.className = "wf-empty";
     empty.textContent = placing ? "Place work force here" : "No permanent work force yet";
     zone.append(empty);
   } else {
-    game.wfBoard.forEach((w, index) => {
+    st.wfBoard.forEach((w, index) => {
       const el = makeGameCard(w.card);
       addBoardOverlays(el, w);
-      const benchItem = selItem && isBenchItem(selItem) && canUseItemOn(selItem, w) === false;
+      const benchItem = side === "me" && selItem && isBenchItem(selItem) && canUseItemOn(selItem, w) === false;
       if (benchItem) {
         // Setting up a bench item: clicking an existing bench card just places
         // it on the board (the click goes through to the work force zone).
@@ -882,7 +963,7 @@ function renderWorkforceBoard() {
         el.title = valid ? `Use ${selItem.name}: ${effect}` : `${selItem.name} can't be used on ${w.card.name}`;
         makeActivatable(el, `Use ${selItem.name} on ${w.card.name}${valid ? `: ${effect}` : " (not allowed)"}`, event => {
           event.stopPropagation();
-          useItemOnWorkforce(index);
+          useItemOnWorkforce(index, side);
         });
       } else {
         el.addEventListener("click", event => {
@@ -908,19 +989,21 @@ function renderWorkforceBoard() {
     zone.removeAttribute("aria-label");
   }
 
-  $("wf-summary").textContent = game
-    ? `available this turn ${formatStat(boardWfAvailable())} / ${formatStat(boardWfTotal())}` +
-      ` · single-use in hand +${formatStat(handWfTotal())}`
-    : "";
+  if (side === "me") {
+    $("wf-summary").textContent = game
+      ? `available this turn ${formatStat(boardWfAvailable())} / ${formatStat(boardWfTotal())}` +
+        ` · single-use in hand +${formatStat(handWfTotal())}`
+      : "";
+  }
 }
 
-function renderBoard() {
-  const board = $("board");
+function renderBoard(st = game, board = $("board"), side = "me") {
   board.replaceChildren();
+  board.classList.toggle("opp", side === "opp");
 
-  const stacks = game ? game.stacks : Array(BOARD_SLOTS).fill(null);
+  const stacks = st ? st.stacks : Array(BOARD_SLOTS).fill(null);
   const inst = selectedInst();
-  const selCard = inst && isPlayCard(inst.card) ? inst.card : null;   // placing a card
+  const selCard = side === "me" && inst && isPlayCard(inst.card) ? inst.card : null;   // placing a card
   const selItem = inst && isItem(inst.card) ? inst.card : null;       // targeting with an item
   const affordable = inst ? canAfford(inst.card) : false;
 
@@ -953,7 +1036,7 @@ function renderBoard() {
           cardEl.title = ok ? `Use ${selItem.name}: ${effect}` : `${selItem.name} can't be used on ${s.card.name}`;
           makeActivatable(cardEl, `Use ${selItem.name} on ${s.card.name}${ok ? `: ${effect}` : " (not allowed)"}`, event => {
             event.stopPropagation();
-            useItemOn(slot, i);
+            useItemOn(slot, i, side);
           });
         } else {
           cardEl.addEventListener("click", event => {
@@ -1060,7 +1143,9 @@ function renderHand() {
   if (game.over) {
     const over = document.createElement("p");
     over.className = "empty";
-    over.textContent = `Game over — final score ${formatStat(totalScore())}. Press “New game” to play again.`;
+    over.textContent = match
+      ? `${matchResultText()} Host or join a new game, or press “New game” to play solo.`
+      : `Game over — final score ${formatStat(totalScore())}. Press “New game” to play again.`;
     hand.append(over);
     return;
   }
@@ -1084,6 +1169,11 @@ function renderHand() {
       ? `${card.name}, item, ${isPermanent(card) ? "permanent" : "single use"}, robustness ${formatStat(improveOf(card))}, budget ${formatStat(improveBudgetOf(card))}, cost ${formatStat(costOf(card))}`
       : `${card.name}, ${typeName(card.type)}, cost ${formatStat(costOf(card))}, degree ${formatStat(degreeOf(card))}, reach ${formatStat(reachOf(card))}`;
 
+    if (match && !myTurn()) {
+      el.classList.add("waiting");
+      hand.append(el);
+      return;
+    }
     makeActivatable(el, `${desc}. ${index === selected ? "Selected." : "Select."}`, () => {
       selected = selected === index ? null : index;
       render();
@@ -1182,12 +1272,383 @@ function renderSelectionBar() {
   $("selection-text").textContent = text;
 }
 
+// ---- Two-player games ---------------------------------------------------------
+// One player hosts (side "a", plays first), the other joins (side "b"). Both
+// browsers hold the full game; the player whose turn it is applies their
+// actions and sends the new state to the other after each action.
+let net = null;        // { send(msg), close() } once connected
+let netBusy = false;   // connecting
+
+const myTurn = () => !match || match.turn === match.me;
+const opponentName = () => (match && match.names[1 - match.me]) || "Opponent";
+const myName = () => (match && match.names[match.me]) || "You";
+const cardById = new Map(cards.map(c => [String(c.id), c]));
+
+function matchResultText() {
+  if (!match || !opp) return "";
+  const mine = totalScore(), theirs = totalScore(opp);
+  const scores = `${formatStat(mine)} – ${formatStat(theirs)}`;
+  if (match.resigned !== undefined && match.resigned !== null) {
+    return match.resigned === match.me
+      ? `You left the game (${scores}).`
+      : `${opponentName()} left the game — you win (${scores})!`;
+  }
+  if (mine > theirs) return `You win ${scores}!`;
+  if (mine < theirs) return `${opponentName()} wins ${scores}.`;
+  return `Draw ${scores}.`;
+}
+
+function finishMatch(message = "", { send = true } = {}) {
+  if (!match) return;
+  match.over = true;
+  game.over = true;
+  if (opp) opp.over = true;
+  selected = null;
+  render();
+  setStatus(`${message} ${match.rounds} rounds played — ${matchResultText()}`.trim());
+  if (send) sendState(message);
+}
+
+// Build a deck (list of card ids) from your own collection.
+function deckIdsFromCollection() {
+  const pool = [];
+  for (const card of cards) {
+    const copies = collection[card.id] || 0;
+    for (let i = 0; i < copies; i++) pool.push(String(card.id));
+  }
+  return shuffle(pool).slice(0, DECK_SIZE);
+}
+
+function newPlayerState(side, deckIds) {
+  const deck = deckIds
+    .map(id => cardById.get(String(id)))
+    .filter(Boolean)
+    .map((card, i) => makeInst(card, side + (i + 1)));
+  return {
+    side, deck, hand: deck.splice(0, HAND_SIZE),
+    stacks: Array(BOARD_SLOTS).fill(null), wfBoard: [],
+    wfSpent: 0, wfPlaced: 0, turn: 1, discarded: 0, consumed: 0,
+    destroyed: 0, itemsUsed: 0, over: false, lastDrawn: null
+  };
+}
+
+// ---- (de)serialisation of the game state ----
+function serInst(inst) {
+  const o = { u: inst.uid, id: inst.base.id };
+  if (inst.items && inst.items.length) o.it = inst.items.map(serInst);
+  return o;
+}
+
+function deInst(o) {
+  const card = cardById.get(String(o.id));
+  if (!card) throw new Error(`Unknown card id ${o.id} (are both players on the same version of the site?)`);
+  const inst = makeInst(card, o.u);
+  inst.items = (o.it || []).map(deInst);
+  return inst;
+}
+
+function serPlayer(st) {
+  return {
+    side: st.side,
+    deck: st.deck.map(serInst), hand: st.hand.map(serInst),
+    stacks: st.stacks.map(stack => (stack ? stack.map(serInst) : null)),
+    wfBoard: st.wfBoard.map(serInst),
+    wfSpent: st.wfSpent, wfPlaced: st.wfPlaced, turn: st.turn, discarded: st.discarded,
+    consumed: st.consumed, destroyed: st.destroyed, itemsUsed: st.itemsUsed,
+    over: st.over, lastDrawn: st.lastDrawn
+  };
+}
+
+function dePlayer(o) {
+  return {
+    ...o,
+    deck: o.deck.map(deInst), hand: o.hand.map(deInst),
+    stacks: o.stacks.map(stack => (stack ? stack.map(deInst) : null)),
+    wfBoard: o.wfBoard.map(deInst)
+  };
+}
+
+function sendState(log = "") {
+  if (!net || !match) return;
+  const players = [];
+  players[match.me] = serPlayer(game);
+  players[1 - match.me] = serPlayer(opp);
+  const { me, ...shared } = match;
+  net.send({ t: "state", players, match: shared, log, from: match.me });
+}
+
+function receiveState(msg) {
+  const me = match ? match.me : (mySide === "a" ? 0 : 1);
+  const wasMyTurn = match && myTurn();
+  match = { ...msg.match, me };
+  game = dePlayer(msg.players[me]);
+  opp = dePlayer(msg.players[1 - me]);
+  selected = null;
+  render();
+  const what = msg.log ? `${opponentName()}: ${opponentView(msg.log)}` : "";
+  if (match.over) {
+    setStatus(`${what} ${match.rounds} rounds played — ${matchResultText()}`.trim());
+  } else if (myTurn() && !wasMyTurn) {
+    setStatus(`${what} — your turn (round ${match.round}/${match.rounds}).`.replace(/^ — /, ""));
+  } else if (what) {
+    setStatus(what);
+  }
+}
+
+// Rewrite the active player's message for the opponent: hide what they drew
+// and switch "you"/"your" to the right person.
+function opponentView(log) {
+  return log
+    .replace(/ You drew [^.]*\./g, "")
+    .replace(/^You passed\./, "passed.")
+    .replace(/\byour work force\b/g, "their work force")
+    .replace(/ Now play a card, pass or discard\./g, "")
+    .split(`${myName()}'s `).join("your ")
+    .trim();
+}
+
+// ---- messages ----
+function onNetMessage(msg) {
+  if (!msg || typeof msg !== "object") return;
+  try {
+    if (msg.t === "hello" && mySide === "a" && !match) {
+      // Host: the guest sent their name and deck -> set up the game.
+      match = {
+        me: 0, turn: 0, round: 1, rounds: VERSUS_ROUNDS, over: false, resigned: null,
+        names: [$("player-name").value.trim() || "Host", String(msg.name || "Guest").slice(0, 24)]
+      };
+      game = newPlayerState("a", deckIdsFromCollection());
+      opp = newPlayerState("b", Array.isArray(msg.deck) ? msg.deck : []);
+      selected = null;
+      setNet(`Connected to ${opponentName()}.`);
+      showView("play-view");
+      render();
+      setStatus(`Game on! ${VERSUS_ROUNDS} rounds — you start.`);
+      sendState("");
+    } else if (msg.t === "state") {
+      if (!match) setNet("Connected.");
+      showView("play-view");
+      receiveState(msg);
+    } else if (msg.t === "bye" && match && !match.over) {
+      match.resigned = 1 - match.me;
+      finishMatch("", { send: false });
+    }
+  } catch (err) {
+    console.error(err);
+    setNet("Error: " + err.message);
+  }
+}
+
+function onNetClosed() {
+  net = null;
+  netBusy = false;
+  if (match && !match.over) {
+    match.resigned = 1 - match.me;
+    finishMatch("Connection lost.", { send: false });
+  }
+  setNet("Disconnected.");
+  render();
+}
+
+function setNet(text) {
+  $("net-status").textContent = text;
+}
+
+// ---- transports ----
+// PeerJS (browser-to-browser over the internet). Loaded only when needed.
+async function loadPeerJs() {
+  for (const src of PEERJS_URLS) {
+    if (window.Peer) return;
+    await new Promise(resolve => {
+      const el = document.createElement("script");
+      el.src = src;
+      el.onload = el.onerror = () => resolve();
+      document.head.append(el);
+    });
+  }
+  if (!window.Peer) throw new Error("could not load PeerJS (are you online?)");
+}
+
+function wrapPeerConnection(conn, peer) {
+  conn.on("data", onNetMessage);
+  conn.on("close", onNetClosed);
+  conn.on("error", err => setNet("Connection error: " + err));
+  return {
+    send: msg => conn.open && conn.send(msg),
+    close: () => { try { conn.close(); peer.destroy(); } catch { /* ignore */ } }
+  };
+}
+
+// Local transport between two tabs of the same browser (for testing):
+// add ?local=1 to the address of both tabs.
+function localTransport(code) {
+  const ch = new BroadcastChannel(PEER_PREFIX + code);
+  ch.onmessage = e => onNetMessage(e.data);
+  return { send: msg => ch.postMessage(msg), close: () => ch.close() };
+}
+const useLocalTransport = new URLSearchParams(location.search).has("local");
+
+function randomCode() {
+  const abc = "abcdefghjkmnpqrstuvwxyz23456789";
+  return Array.from({ length: 6 }, () => abc[Math.floor(Math.random() * abc.length)]).join("");
+}
+
+function inviteLink(code) {
+  const url = new URL(location.href);
+  url.search = "";
+  url.hash = "play";
+  url.searchParams.set("join", code);
+  if (useLocalTransport) url.searchParams.set("local", "1");
+  return url.toString();
+}
+
+async function hostGame() {
+  if (!deckIdsFromCollection().length) {
+    setNet("Your collection is empty — open some boosters first!");
+    return;
+  }
+  leaveGame(false);
+  mySide = "a";
+  netBusy = true;
+  render();
+  const code = randomCode();
+  $("invite").hidden = false;
+  $("invite-link").value = inviteLink(code);
+  $("invite-code").textContent = code;
+
+  if (useLocalTransport) {
+    net = localTransport(code);
+    setNet(`Waiting for a second tab to join with code ${code}…`);
+    netBusy = false;
+    render();
+    return;
+  }
+  try {
+    setNet("Connecting to the matchmaking service…");
+    await loadPeerJs();
+    const peer = new window.Peer(PEER_PREFIX + code);
+    peer.on("open", () => setNet(`Waiting for your opponent… Send them the link or the code ${code}.`));
+    peer.on("error", err => { netBusy = false; setNet("Network error: " + (err.type || err)); render(); });
+    peer.on("connection", conn => {
+      if (net) { conn.on("open", () => conn.close()); return; } // only one opponent
+      conn.on("open", () => {
+        net = wrapPeerConnection(conn, peer);
+        netBusy = false;
+        setNet("Opponent connected, setting up the game…");
+      });
+    });
+  } catch (err) {
+    netBusy = false;
+    setNet("Error: " + err.message);
+    render();
+  }
+}
+
+async function joinGame(code) {
+  code = String(code || "").trim().toLowerCase().replace(/^.*join=/, "").replace(/[^a-z0-9]/g, "");
+  if (!code) { setNet("Enter the code your opponent gave you."); return; }
+  const deck = deckIdsFromCollection();
+  if (!deck.length) { setNet("Your collection is empty — open some boosters first!"); return; }
+  leaveGame(false);
+  mySide = "b";
+  netBusy = true;
+  render();
+  const hello = { t: "hello", name: $("player-name").value.trim() || "Guest", deck };
+
+  if (useLocalTransport) {
+    net = localTransport(code);
+    netBusy = false;
+    setNet("Joining…");
+    net.send(hello);
+    render();
+    return;
+  }
+  try {
+    setNet("Connecting…");
+    await loadPeerJs();
+    const peer = new window.Peer();
+    peer.on("error", err => {
+      netBusy = false;
+      setNet(err.type === "peer-unavailable"
+        ? "No game found with this code (the host must keep the page open)."
+        : "Network error: " + (err.type || err));
+      render();
+    });
+    peer.on("open", () => {
+      const conn = peer.connect(PEER_PREFIX + code, { reliable: true });
+      conn.on("open", () => {
+        net = wrapPeerConnection(conn, peer);
+        netBusy = false;
+        setNet("Connected, waiting for the host to start…");
+        net.send(hello);
+      });
+    });
+  } catch (err) {
+    netBusy = false;
+    setNet("Error: " + err.message);
+    render();
+  }
+}
+
+// Leave the current two-player game (tells the opponent).
+function leaveGame(notify = true) {
+  if (net) {
+    if (notify && match && !match.over) net.send({ t: "bye" });
+    net.close();
+    net = null;
+  }
+  if (match && !match.over && notify) {
+    match.resigned = match.me;
+    finishMatch("", { send: false });
+  }
+  netBusy = false;
+  $("invite").hidden = true;
+}
+
 // ---- Wiring -----------------------------------------------------------------
 $("new-game").addEventListener("click", () => {
   if (game && !game.over && !confirm("Abandon the current game and start a new one?")) return;
+  if (net) leaveGame(false);
+  mySide = "s";
   newGame();
 });
 $("end-game").addEventListener("click", () => finishGame());
+$("host-game").addEventListener("click", hostGame);
+$("join-game").addEventListener("click", () => joinGame($("join-code").value));
+$("join-code").addEventListener("keydown", e => { if (e.key === "Enter") joinGame($("join-code").value); });
+$("leave-game").addEventListener("click", () => {
+  if (match && !match.over && !confirm("Leave the game? Your opponent wins.")) return;
+  leaveGame(true);
+  setNet("You left the game.");
+  render();
+});
+$("copy-invite").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("invite-link").value);
+    $("copy-invite").textContent = "Copied!";
+  } catch {
+    $("invite-link").select();
+  }
+  setTimeout(() => { $("copy-invite").textContent = "Copy link"; }, 1500);
+});
+window.addEventListener("beforeunload", () => {
+  if (net && match && !match.over) net.send({ t: "bye" });
+});
+try {
+  const saved = localStorage.getItem("my-gacha-player-name");
+  if (saved) $("player-name").value = saved;
+} catch { /* ignore */ }
+$("player-name").addEventListener("change", () => {
+  try { localStorage.setItem("my-gacha-player-name", $("player-name").value.trim()); } catch { /* ignore */ }
+});
+// Opened from an invitation link: prefill the code.
+{
+  const code = new URLSearchParams(location.search).get("join");
+  if (code) {
+    $("join-code").value = code;
+    setNet("You were invited to a game: enter your name and press “Join”.");
+  }
+}
 $("pass-turn").addEventListener("click", passTurn);
 $("wf-board").addEventListener("click", () => {
   const inst = selectedInst();
