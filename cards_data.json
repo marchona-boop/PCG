@@ -848,7 +848,8 @@
     "weight": 40,
     "image": "cards/phys_card_game-figure72.png",
     "description": "attached to a card, budget +5",
-    "permanent": "true" },
+    "permanent": "true",
+    "improve budget": "5" },
 
   { "id": "074",
     "name": "Agence Nationale de la Recherche",
@@ -857,7 +858,8 @@
     "weight": 40,
     "image": "cards/phys_card_game-figure73.png",
     "description": "attached to a card, budget +2",
-    "permanent": "true" },
+    "permanent": "true",
+    "improve budget": "2" },
 
   { "id": "075",
     "name": "Modified newtonian dynamics",
