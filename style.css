@@ -1400,3 +1400,134 @@ body.playing .view-tabs .tab { padding: 6px 14px; }
 }
 .deck-count { white-space: nowrap; font-size: 0.8rem; }
 .deck-btn { padding: 1px 8px !important; min-width: 26px; }
+
+
+/* ===================== Foldable collection / deck sections ===================== */
+.fold-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.fold-bar #summary { margin: 0; }
+.fold-buttons { display: flex; gap: 8px; }
+.fold-buttons button { padding: 6px 12px; font-size: 0.85rem; }
+
+#collection > details.collection-type { margin: 16px 0; }
+#collection details.collection-type > summary.collection-type-heading,
+details.deck-type > summary.deck-type-heading {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+#collection details.collection-type > summary::-webkit-details-marker,
+details.deck-type > summary::-webkit-details-marker { display: none; }
+#collection details.collection-type > summary::before,
+details.deck-type > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 1em;
+  margin-right: 4px;
+  transition: transform 150ms ease;
+}
+#collection details[open].collection-type > summary::before,
+details[open].deck-type > summary::before { transform: rotate(90deg); }
+#collection details.collection-type:not([open]) > summary { margin-bottom: 0; }
+#collection details.collection-type > summary:hover,
+details.deck-type > summary:hover { filter: brightness(1.2); }
+#collection .type-count {
+  margin-left: auto;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+details.deck-type:not([open]) > summary { margin-bottom: 0; }
+
+
+/* ===================== Opponent facing you =====================
+   Their board is above their bench and both are turned upside down (as if
+   seen from across the table). Numbers and labels are turned back so that
+   they stay readable. */
+.opponent-zone .board,
+.opponent-zone .wf-board {
+  transform: rotate(180deg);
+}
+.opponent-zone .wf-board { margin: 8px 0 0; }
+.opponent-zone .stack-info,
+.opponent-zone .gc-attached,
+.opponent-zone .wf-board .wf-empty,
+.opponent-zone .slot.empty-slot > span {
+  transform: rotate(180deg);
+}
+/* Hover lifts the card towards the opponent's side (down on your screen). */
+.opponent-zone .board .stack > .game-card:hover,
+.opponent-zone .wf-board .game-card:hover { transform: translateY(-2px); }
+
+
+/* ===================== h± index ===================== */
+.pm {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: middle;
+  line-height: 0.85;
+  font-size: 0.7em;
+  margin: 0 1px;
+  text-transform: none;
+}
+.pm sup, .pm sub { font-size: 1em; vertical-align: baseline; position: static; }
+.hud-h span { text-transform: none !important; letter-spacing: 0.02em !important; }
+.hud-h strong { color: #ffe2a3 !important; }
+.hindex-line { color: var(--muted); }
+.hindex-line strong { color: #ffe2a3; }
+.hindex-line small { margin-left: 4px; opacity: 0.8; }
+
+/* Counter on a special card's round icon (e.g. turns left) */
+.gc-chip-badge {
+  position: relative;
+  z-index: 2;
+  margin-left: -10px;
+  align-self: flex-end;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: #b3261e;
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: 0 1px 4px #000c;
+}
+.hud-h span { white-space: nowrap; }
+.hud-h .pm { font-size: 0.8em; }
+.game-hud span.pm { display: inline-flex; font-size: 0.85em; letter-spacing: 0; }
+.game-hud span.pm sup, .game-hud span.pm sub { display: block; }
+
+
+/* ===================== Type logos on the blurred booster cards ===================== */
+.card.mystery .mystery-logos {
+  position: absolute;
+  top: 38%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 2;
+}
+.card.mystery .mystery-logos img {
+  width: 54px !important;
+  height: 54px;
+  aspect-ratio: 1 !important;
+  object-fit: contain !important;
+  background: #080d1acc !important;
+  border-radius: 50% !important;
+  padding: 6px;
+  filter: drop-shadow(0 0 10px #72e0f5aa) !important;
+  transform: rotate(-90deg) !important;   /* same orientation as in the collection */
+  box-shadow: 0 4px 14px #000a;
+}
+/* When logos are shown they replace the big "?" */
+.card.mystery.has-logos::after { content: none; }

@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -16,13 +15,14 @@
 </header>
 
 <nav class="view-tabs" aria-label="Sections">
-  <button type="button" class="tab" data-view="collection-view" aria-pressed="true">Boosters &amp; collection</button>
+  <button type="button" class="tab" data-view="booster-view" aria-pressed="true">Boosters</button>
+  <button type="button" class="tab" data-view="collection-view" aria-pressed="false">Collection</button>
   <button type="button" class="tab" data-view="deck-view" aria-pressed="false">Deck</button>
   <button type="button" class="tab" data-view="play-view" aria-pressed="false">Play</button>
 </nav>
 
 <main>
- <div id="collection-view">
+ <div id="booster-view">
   <section aria-labelledby="summon-title">
     <h2 id="summon-title" style="text-align:center">Open a booster</h2>
     <p style="text-align:center;color:var(--muted)">
@@ -40,10 +40,18 @@
     <h3 id="chosen-title" hidden>Your new cards</h3>
     <div id="chosen-cards" class="grid"></div>
   </section>
+ </div>
 
+ <div id="collection-view" hidden>
   <section aria-labelledby="collection-title">
     <h2 id="collection-title">My collection</h2>
-    <p id="summary" style="color:var(--muted)"></p>
+    <div class="fold-bar">
+      <p id="summary" style="color:var(--muted)"></p>
+      <div class="fold-buttons">
+        <button type="button" class="secondary" id="fold-all">Fold all</button>
+        <button type="button" class="secondary" id="unfold-all">Unfold all</button>
+      </div>
+    </div>
     <div id="collection" class="grid"></div>
   </section>
  </div>
@@ -96,6 +104,7 @@
       <summary>Play against someone online</summary>
       <div class="versus-row">
         <label>Your name <input id="player-name" type="text" maxlength="24" placeholder="e.g. Marie"></label>
+        <span class="hindex-line" title="Starts at 0; after every online game played to the end, the score difference with your opponent is added.">Your h<span class="pm"><sup>+</sup><sub>−</sub></span> index: <strong id="my-hindex">0</strong> <small id="my-hindex-games"></small></span>
       </div>
       <div class="versus-row">
         <button id="host-game" type="button" class="secondary">Host an online game</button>
@@ -122,6 +131,8 @@
       <div><span>Score</span><strong id="hud-score">0</strong></div>
       <div id="hud-opp-box" hidden><span>Opponent</span><strong id="hud-opp">0</strong></div>
       <div id="hud-round-box" hidden><span>Round</span><strong id="hud-round">0</strong></div>
+      <div id="hud-h-box" class="hud-h" hidden><span title="h-plus-minus index">Your h<span class="pm"><sup>+</sup><sub>−</sub></span></span><strong id="hud-h">0</strong></div>
+      <div id="hud-opp-h-box" class="hud-h" hidden><span title="Opponent's h-plus-minus index">Opp. h<span class="pm"><sup>+</sup><sub>−</sub></span></span><strong id="hud-opp-h">0</strong></div>
       <div id="hud-best-box"><span>Best</span><strong id="hud-best">0</strong></div>
       <div><span>Turn</span><strong id="hud-turn">0</strong></div>
       <div><span>Deck</span><strong id="hud-deck">0</strong></div>
@@ -131,8 +142,8 @@
 
     <section id="opponent-zone" class="player-zone opponent-zone" hidden aria-label="Opponent">
       <h3 class="zone-title opp-title"><span id="opp-title">Opponent</span> <small id="opp-summary"></small></h3>
-      <div id="opp-wf-board" class="wf-board opp"></div>
       <div id="opp-board" class="board opp"></div>
+      <div id="opp-wf-board" class="wf-board opp"></div>
     </section>
 
     <section id="my-zone" class="player-zone my-zone" aria-label="Your side">
@@ -198,8 +209,8 @@
 <footer>Your collection is saved locally in this browser.</footer>
 
 <script type="module" src="script.js"></script>
-<script type="module" src="deck.js?v=2026-10-26-deck"></script>
-<script type="module" src="game.js?v=2026-10-26-deck2"></script>
+<script type="module" src="deck.js?v=2026-10-28"></script>
+<script type="module" src="game.js?v=2026-10-28b"></script>
 
 </body>
 </html>

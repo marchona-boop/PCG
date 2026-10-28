@@ -50,9 +50,10 @@
 //   index.html). Add ?local=1 to the address to test with two tabs instead.
 
 import { cards, typeInfo, collection, openCardInspection } from "./script.js";
-import { deckForGame, deckSummary, renderDeckBuilder } from "./deck.js?v=2026-10-26-deck";
+import { deckForGame, deckSummary, renderDeckBuilder } from "./deck.js?v=2026-10-28";
+import { specialFor } from "./special_cards/index.js?v=2026-10-28";
 
-const GAME_VERSION = "2026-10-26-deck2";
+const GAME_VERSION = "2026-10-28b";
 
 // ---- Tunable settings -------------------------------------------------------
 const HAND_SIZE = 5;          // cards in hand at the start
@@ -452,6 +453,67 @@ function shortfall(card) {
   return costOf(card) - boardWfAvailable() - handWfTotal();
 }
 
+// ---- Special cards (see special_cards/index.js) ------------------------------
+const specialApi = {
+  onBench: inst => onBench(inst),
+  ownerOf: inst => ownerOf(inst),
+  specialId: card => String((card && card.special) || "").toLowerCase().replace(/[\s_-]+/g, ""),
+  attach(holder, itemInst) {
+    holder.items = holder.items || [];
+    holder.items.push(itemInst);
+  },
+  detach(holder, itemInst) {
+    holder.items = (holder.items || []).filter(it => it !== itemInst);
+  },
+  discardFromBench(st, inst) {
+    const i = st.wfBoard.indexOf(inst);
+    if (i !== -1) { st.wfBoard.splice(i, 1); st.destroyed++; }
+  },
+  discardFromBoard(st, inst) {
+    for (let slot = 0; slot < st.stacks.length; slot++) {
+      const stack = st.stacks[slot];
+      const i = stack ? stack.indexOf(inst) : -1;
+      if (i === -1) continue;
+      const gone = stack.splice(i);
+      if (!stack.length) st.stacks[slot] = null;
+      st.destroyed += gone.length;
+    }
+  },
+  formatStat
+};
+
+// Every special card currently attached to a card on a board.
+function attachedSpecials() {
+  const out = [];
+  for (const st of states()) {
+    const holders = [...st.stacks.flatMap(stack => stack || []), ...st.wfBoard];
+    for (const holder of holders) {
+      for (const item of holder.items || []) {
+        const sp = specialFor(item.base || item.card);
+        if (sp) out.push({ sp, item, holder, holderOwner: st });
+      }
+    }
+  }
+  return out;
+}
+
+// Run a hook ("onCardPlayed" / "onTurnEnd") of every attached special card.
+function runSpecialHook(hook, extra) {
+  const notes = [];
+  for (const a of attachedSpecials()) {
+    if (typeof a.sp[hook] !== "function") continue;
+    try {
+      const msg = a.sp[hook](specialApi, { ...a, ...extra });
+      if (msg) notes.push(msg);
+    } catch (err) {
+      console.error(`special card ${a.sp.id}:`, err);
+    }
+  }
+  return notes.length ? " " + notes.join(" ") : "";
+}
+
+const cardPlayed = played => runSpecialHook("onCardPlayed", { player: game, played });
+
 // ---- Rules ------------------------------------------------------------------
 function canPlaceOn(card, stack) {
   if (!stack) return true; // empty slot
@@ -470,6 +532,7 @@ function canPlaceWorkforce() {
 // The stat an item changes on a given board card, or null if it can't target it.
 function itemStatFor(item, inst) {
   if (!inst) return null;
+  if (specialFor(item)) return null;
   if (!onBench(inst) && isPlayCard(inst.card) && affectsRobustness(item)) {
     return { label: "robustness", now: robustnessOf(inst), delta: improveOf(item) };
   }
@@ -481,6 +544,11 @@ function itemStatFor(item, inst) {
 
 // Can this item be used on this board card?
 function canUseItemOn(item, inst) {
+  const sp = specialFor(item);
+  if (sp) {
+    if (!inst || typeof sp.canTarget !== "function") return false;
+    return !!sp.canTarget(specialApi, { item, target: inst, targetOwner: ownerOf(inst) });
+  }
   const stat = itemStatFor(item, inst);
   if (!stat) return false;
   if (isPermanent(item)) return true;
@@ -505,6 +573,9 @@ function itemTargets(item) {
 
 // Text describing what an item would do to a board card.
 function itemEffectText(item, inst, above = 0) {
+  const sp = specialFor(item);
+  if (sp) return typeof sp.describeTarget === "function"
+    ? sp.describeTarget(specialApi, { item, target: inst, targetOwner: ownerOf(inst) }) : "";
   const stat = itemStatFor(item, inst);
   if (!stat) return "";
   const after = stat.now + stat.delta;
@@ -572,7 +643,7 @@ function playTo(slot) {
     message = `Played ${card.name} on a new stack.`;
   }
   if (plan.cost > 0) message += ` (${describePayment(plan)})`;
-  endTurn(message);
+  endTurn(message + cardPlayed(inst));
 }
 
 function useItemOn(slot, index, side = "me") {
@@ -613,6 +684,16 @@ function useItem(where) {
   applyPayment(plan);
   game.hand = game.hand.filter(i => i.uid !== itemInst.uid);
 
+  const sp = specialFor(item);
+  if (sp) {
+    let msg = typeof sp.use === "function"
+      ? sp.use(specialApi, { itemInst, item, target, targetOwner: st, whose, player: game }) || ""
+      : "";
+    if (plan.cost > 0) msg += ` (${describePayment(plan)})`;
+    endTurn(msg + cardPlayed(itemInst));
+    return;
+  }
+
   let message;
   if (isPermanent(item)) {
     target.items = target.items || [];
@@ -643,7 +724,7 @@ function useItem(where) {
     }
   }
   if (plan.cost > 0) message += ` (${describePayment(plan)})`;
-  endTurn(message);
+  endTurn(message + cardPlayed(itemInst));
 }
 
 function placeWorkforce() {
@@ -672,6 +753,7 @@ function placeWorkforce() {
   let message = wf
     ? `${inst.card.name} joined your work force (+${formatStat(wf)} every turn, starting now).`
     : `${inst.card.name} was set up on the work force board.`;
+  message += cardPlayed(inst);
   message += resolveDestruction();
   if (plan.cost > 0) message += ` (${describePayment(plan)})`;
   render();
@@ -698,6 +780,7 @@ function passTurn() {
 function endTurn(message) {
   selected = null;
   game.lastDrawn = null;
+  message += runSpecialHook("onTurnEnd", { player: game });
   message += resolveDestruction();
 
   if (game.deck.length) {
@@ -900,16 +983,25 @@ function renderOpponent() {
   const zone = $("opponent-zone");
   zone.hidden = !match || !opp;
   $("hud-round-box").hidden = !match;
+  $("hud-h-box").hidden = !match;
+  $("hud-opp-h-box").hidden = !match;
+  $("hud-h").textContent = formatStat(hindex.value);
   $("hud-opp-box").hidden = !match;
   $("hud-best-box").hidden = !!match;
-  if (!match || !opp) return;
+  if (!match || !opp) {
+    $("turn-banner").hidden = true;   // no "your turn" / result banner outside online games
+    return;
+  }
   renderWorkforceBoard(opp, $("opp-wf-board"), "opp");
   renderBoard(opp, $("opp-board"), "opp");
   $("opp-title").textContent = opponentName();
   $("opp-summary").textContent =
+    (oppHIndex() === null ? "" : `h± ${formatStat(oppHIndex())} · `) +
     `score ${formatStat(totalScore(opp))} · work force ${formatStat(boardWfTotal(opp))}` +
     ` · ${opp.hand.length} card(s) in hand · deck ${opp.deck.length}`;
   $("hud-round").textContent = `${Math.min(match.round, match.rounds)}/${match.rounds}`;
+  const oh = oppHIndex();
+  $("hud-opp-h").textContent = oh === null ? "?" : formatStat(oh);
   $("hud-opp").textContent = formatStat(totalScore(opp));
   $("turn-banner").hidden = false;
   $("turn-banner").className = "turn-banner " + (match.over ? "over" : myTurn() ? "mine" : "theirs");
@@ -1099,6 +1191,19 @@ function addBoardOverlays(cardEl, inst) {
       }
     });
     strip.append(chip);
+    // Special cards can show a counter on their icon (e.g. turns left).
+    const sp = specialFor(it.base || it.card);
+    if (sp && typeof sp.chip === "function") {
+      const info = sp.chip(specialApi, { item: it, holder: inst, holderOwner: ownerOf(inst) }) || {};
+      if (info.title) chip.title = info.title;
+      if (info.badge) {
+        const b = document.createElement("span");
+        b.className = "gc-chip-badge";
+        b.textContent = info.badge;
+        b.title = info.title || "";
+        strip.append(b);
+      }
+    }
   }
 
   const isWf = isWfCard;
@@ -1114,7 +1219,7 @@ function addBoardOverlays(cardEl, inst) {
     r.title = `Reach ${formatStat(reachOf(inst.card))} → ${formatStat(boardReach(inst))}`;
     strip.append(r);
   }
-  if (items.length || now !== base) {
+  if (items.some(it => !specialFor(it.base || it.card)) || now !== base) {
     const rob = document.createElement("span");
     rob.className = "gc-rob " + (isWf ? "budget " : "") + (now > base ? "up" : now < base ? "down" : "");
     rob.textContent = formatStat(now);
@@ -1245,6 +1350,8 @@ function renderSelectionBar() {
     const sign = n => (n >= 0 ? "+" : "") + formatStat(n);
     if (affectsRobustness(card)) effects.push(`robustness ${sign(improveOf(card))}`);
     if (affectsBudget(card)) effects.push(`budget ${sign(improveBudgetOf(card))}`);
+    const spc = specialFor(card);
+    if (spc && typeof spc.describe === "function") effects.push(spc.describe(card));
     text = `${card.name} — item · ${isPermanent(card) ? "permanent" : "single use"}` +
       (effects.length ? ` · ${effects.join(" · ")}` : "") + " · " +
       (plan ? describePayment(plan) : `cost ${formatStat(costOf(card))} (can't afford)`);
@@ -1276,6 +1383,65 @@ function renderSelectionBar() {
 let net = null;        // { send(msg), close() } once connected
 let netBusy = false;   // connecting
 
+// ---- h± index: personal ranking, saved in this browser ----
+// Starts at 0; after every online game played to the end, the score difference
+// with the opponent is added (win 20-10: +10, loss 160-200: -40).
+const HINDEX_KEY = "my-gacha-hindex-v1";
+function loadHIndex() {
+  try {
+    const o = JSON.parse(localStorage.getItem(HINDEX_KEY) || "{}");
+    return {
+      value: Number.isFinite(o.value) ? o.value : 0,
+      games: Number.isSafeInteger(o.games) ? o.games : 0,
+      recorded: Array.isArray(o.recorded) ? o.recorded.slice(-50) : []
+    };
+  } catch {
+    return { value: 0, games: 0, recorded: [] };
+  }
+}
+let hindex = loadHIndex();
+function saveHIndex() {
+  try { localStorage.setItem(HINDEX_KEY, JSON.stringify(hindex)); } catch { /* ignore */ }
+}
+const signed = n => (n > 0 ? "+" : n < 0 ? "−" : "") + formatStat(Math.abs(n));
+
+// Add the result of the finished match to your h± index (once per match).
+// Returns a short message, or "" if nothing changed.
+function recordMatch() {
+  if (!match || !match.over || !opp || !match.id) return "";
+  if (match.resigned !== undefined && match.resigned !== null) return ""; // abandoned games don't count
+  if (hindex.recorded.includes(match.id)) return "";
+  const delta = totalScore() - totalScore(opp);
+  if (!Number.isFinite(delta)) return "";
+  const before = hindex.value;
+  hindex.value += delta;
+  hindex.games++;
+  hindex.recorded = [...hindex.recorded, match.id].slice(-50);
+  saveHIndex();
+  renderHIndex();
+  return ` Your h± index: ${formatStat(before)} → ${formatStat(hindex.value)} (${signed(delta)}).`;
+}
+
+// The opponent's h± index (as it was at the start, updated with this game's
+// result once the game is over).
+function oppHIndex() {
+  if (!match || !match.h) return null;
+  let v = match.h[1 - match.me];
+  if (!Number.isFinite(v)) return null;
+  if (match.over && (match.resigned === undefined || match.resigned === null)) {
+    const d = totalScore(opp) - totalScore();
+    if (Number.isFinite(d)) v += d;
+  }
+  return v;
+}
+
+function renderHIndex() {
+  $("my-hindex").textContent = formatStat(hindex.value);
+  $("my-hindex-games").textContent = hindex.games
+    ? `${hindex.games} online game${hindex.games > 1 ? "s" : ""}`
+    : "no online game yet";
+}
+
 const myTurn = () => !match || match.turn === match.me;
 const opponentName = () => (match && match.names[1 - match.me]) || "Opponent";
 const myName = () => (match && match.names[match.me]) || "You";
@@ -1301,8 +1467,9 @@ function finishMatch(message = "", { send = true } = {}) {
   game.over = true;
   if (opp) opp.over = true;
   selected = null;
+  const h = recordMatch();
   render();
-  setStatus(`${message} ${match.rounds} rounds played — ${matchResultText()}`.trim());
+  setStatus(`${message} ${match.resigned != null ? "" : match.rounds + " rounds played — "}${matchResultText()}${h}`.trim());
   if (send) sendState(message);
 }
 
@@ -1327,6 +1494,7 @@ function newPlayerState(side, deckIds) {
 // ---- (de)serialisation of the game state ----
 function serInst(inst) {
   const o = { u: inst.uid, id: inst.base.id };
+  if (inst.data) o.d = inst.data;
   if (inst.items && inst.items.length) o.it = inst.items.map(serInst);
   return o;
 }
@@ -1336,6 +1504,7 @@ function deInst(o) {
   if (!card) throw new Error(`Unknown card id ${o.id} (are both players on the same version of the site?)`);
   const inst = makeInst(card, o.u);
   inst.items = (o.it || []).map(deInst);
+  if (o.d) inst.data = o.d;
   return inst;
 }
 
@@ -1376,10 +1545,11 @@ function receiveState(msg) {
   game = dePlayer(msg.players[me]);
   opp = dePlayer(msg.players[1 - me]);
   selected = null;
+  const h = match.over ? recordMatch() : "";
   render();
   const what = msg.log ? `${opponentName()}: ${opponentView(msg.log)}` : "";
   if (match.over) {
-    setStatus(`${what} ${match.rounds} rounds played — ${matchResultText()}`.trim());
+    setStatus(`${what} ${match.resigned != null ? "" : match.rounds + " rounds played — "}${matchResultText()}${h}`.trim());
   } else if (myTurn() && !wasMyTurn) {
     setStatus(`${what} — your turn (round ${match.round}/${match.rounds}).`.replace(/^ — /, ""));
   } else if (what) {
@@ -1406,8 +1576,10 @@ function onNetMessage(msg) {
     if (msg.t === "hello" && mySide === "a" && !match) {
       // Host: the guest sent their name and deck -> set up the game.
       match = {
+        id: randomCode() + Date.now().toString(36),
         me: 0, turn: 0, round: 1, rounds: VERSUS_ROUNDS, over: false, resigned: null,
-        names: [$("player-name").value.trim() || "Host", String(msg.name || "Guest").slice(0, 24)]
+        names: [$("player-name").value.trim() || "Host", String(msg.name || "Guest").slice(0, 24)],
+        h: [hindex.value, Number.isFinite(msg.h) ? msg.h : 0]
       };
       game = newPlayerState("a", deckIdsFromCollection());
       opp = newPlayerState("b", Array.isArray(msg.deck) ? msg.deck : []);
@@ -1546,7 +1718,7 @@ async function joinGame(code) {
   mySide = "b";
   netBusy = true;
   render();
-  const hello = { t: "hello", name: $("player-name").value.trim() || "Guest", deck };
+  const hello = { t: "hello", name: $("player-name").value.trim() || "Guest", deck, h: hindex.value };
 
   if (useLocalTransport) {
     net = localTransport(code);
@@ -1645,6 +1817,7 @@ try {
 $("player-name").addEventListener("change", () => {
   try { localStorage.setItem("my-gacha-player-name", $("player-name").value.trim()); } catch { /* ignore */ }
 });
+renderHIndex();
 // Opened from an invitation link: prefill the code.
 {
   const code = new URLSearchParams(location.search).get("join");
@@ -1686,9 +1859,10 @@ document.addEventListener("keydown", event => {
 });
 
 // View tabs (Boosters & collection / Play)
-const views = ["collection-view", "deck-view", "play-view"];
+const views = ["booster-view", "collection-view", "deck-view", "play-view"];
+const viewHashes = { "booster-view": "#", "collection-view": "#collection", "deck-view": "#deck", "play-view": "#play" };
 function showView(id) {
-  if (!views.includes(id)) id = "collection-view";
+  if (!views.includes(id)) id = "booster-view";
   document.body.classList.toggle("playing", id === "play-view" || id === "deck-view");
   if (id === "deck-view") renderDeckBuilder();
   if (id === "play-view") $("deck-line-text").textContent = deckSummary();
@@ -1700,11 +1874,11 @@ function showView(id) {
 document.querySelectorAll(".view-tabs .tab").forEach(tab => {
   tab.addEventListener("click", () => {
     showView(tab.dataset.view);
-    history.replaceState(null, "", { "play-view": "#play", "deck-view": "#deck" }[tab.dataset.view] || "#");
+    history.replaceState(null, "", viewHashes[tab.dataset.view] || "#");
   });
 });
 const viewFromHash = () =>
-  showView({ "#play": "play-view", "#deck": "deck-view" }[location.hash] || "collection-view");
+  showView({ "#play": "play-view", "#deck": "deck-view", "#collection": "collection-view" }[location.hash] || "booster-view");
 window.addEventListener("hashchange", viewFromHash);
 viewFromHash();
 

@@ -639,7 +639,8 @@
     "rarity": "Common",
     "weight": 40,
     "image": "cards/phys_card_game-figure55.png",
-    "description": "Place this card on a research facility. If after three turns no publication was played, discard the facility." },
+    "description": "Place this card on a research facility. If after three turns no publication was played, discard the facility.",
+    "special": "publish-or-perish" },
 
   { "id": "057",
     "name": "Partially Conserved Axial Current",

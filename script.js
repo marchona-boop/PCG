@@ -47,12 +47,33 @@ export const typeInfo = {
     logo: "type_logos/condmattsymbol.png"
   },
   "workforce": {
-    name: "Work Force"
+    name: "Work Force",
+    logo: "type_logos/workforcesymbol.png"
   },
   "item": {
-    name: "Items & Events"
+    name: "Items & Events",
+    logo: "type_logos/itemsymbol.png"
   }
 };
+
+// Logos of all the types of a card (main type first, then its subtypes).
+function typeLogos(card) {
+  const norm = t => String(t ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+  const keys = Object.keys(typeInfo);
+  const wanted = [card.type];
+  for (const key of Object.keys(card)) {
+    if (!/^sub[\s_-]?types?$/i.test(key.trim())) continue;
+    const v = card[key];
+    wanted.push(...(Array.isArray(v) ? v : v == null ? [] : String(v).split(/[,;]/)));
+  }
+  const out = [];
+  for (const t of wanted) {
+    const k = keys.find(k => norm(k) === norm(t));
+    const logo = k && typeInfo[k].logo;
+    if (logo && !out.includes(logo)) out.push(logo);
+  }
+  return out;
+}
 
 function loadCollection() {
   try {
@@ -247,6 +268,15 @@ document.addEventListener("keydown", event => {
 
 
 
+// Folded type sections of the collection (remembered in this browser).
+const FOLD_KEY = "my-gacha-collection-folded-v1";
+const folded = new Set((() => {
+  try { return JSON.parse(localStorage.getItem(FOLD_KEY) || "[]"); } catch { return []; }
+})());
+function saveFolded() {
+  try { localStorage.setItem(FOLD_KEY, JSON.stringify([...folded])); } catch { /* ignore */ }
+}
+
 function renderCollection() {
   const area = $("collection");
   area.replaceChildren();
@@ -307,11 +337,17 @@ function renderCollection() {
 
   // Display a heading and a separate grid for each type.
   for (const [type, typeCards] of groups) {
-    const section = document.createElement("section");
+    // Each type is a foldable section: click its heading to fold / unfold it.
+    const section = document.createElement("details");
     section.className = "collection-type";
+    section.dataset.type = type;
+    section.open = !folded.has(type);
+    section.addEventListener("toggle", () => {
+      if (section.open) folded.delete(type); else folded.add(type);
+      saveFolded();
+    });
 
-    
-    const heading = document.createElement("h3");
+    const heading = document.createElement("summary");
     heading.className = "collection-type-heading";
 
     const info = typeInfo[type] || {
@@ -330,7 +366,10 @@ function renderCollection() {
 
     const label = document.createElement("span");
     label.textContent = info.name;
-    heading.append(label);
+    const n = document.createElement("small");
+    n.className = "type-count";
+    n.textContent = `${typeCards.length} card${typeCards.length > 1 ? "s" : ""}`;
+    heading.append(label, n);
 
     const grid = document.createElement("div");
     grid.className = "collection-type-grid";
@@ -387,6 +426,25 @@ function showMysteryChoices(session) {
     const element = makeCardElement(card);
 
     element.classList.add("mystery");
+
+    // Show the type logo(s) on top of the blurred card.
+    const logos = typeLogos(card);
+    if (logos.length) {
+      element.classList.add("has-logos");
+      const box = document.createElement("div");
+      box.className = "mystery-logos";
+      for (const src of logos) {
+        const logo = document.createElement("img");
+        logo.src = src;
+        logo.alt = "";
+        logo.onerror = () => {
+          logo.remove();
+          if (!box.children.length) element.classList.remove("has-logos");
+        };
+        box.append(logo);
+      }
+      element.append(box);
+    }
     element.tabIndex = 0;
     element.setAttribute("role", "button");
     element.setAttribute(
@@ -460,6 +518,12 @@ function chooseMysteryCard(card, session) {
 
 
 $("draw").addEventListener("click", startBoosterSelection);
+
+function foldAll(fold) {
+  document.querySelectorAll("#collection .collection-type").forEach(d => { d.open = !fold; });
+}
+$("fold-all").addEventListener("click", () => foldAll(true));
+$("unfold-all").addEventListener("click", () => foldAll(false));
 
 $("reset").addEventListener("click", () => {
   if (!confirm("Delete your saved collection from this browser?")) return;

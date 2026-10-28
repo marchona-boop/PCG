@@ -16,6 +16,15 @@ const norm = t => String(t ?? "").toLowerCase().replace(/[\s_-]+/g, "");
 const typeOrder = ["workforce", "item", "particle", "astro", "gravity", "condmatt", "thermo", "electromag", "hydro"];
 const rarityRank = { Legendary: 3, Rare: 2, Common: 1 };
 
+// Folded type groups in the deck builder (remembered in this browser).
+const DECK_FOLD_KEY = "my-gacha-deck-folded-v1";
+const folded = new Set((() => {
+  try { return JSON.parse(localStorage.getItem(DECK_FOLD_KEY) || "[]"); } catch { return []; }
+})());
+function saveFolded() {
+  try { localStorage.setItem(DECK_FOLD_KEY, JSON.stringify([...folded])); } catch { /* ignore */ }
+}
+
 // deck = { cardId: number of copies }
 let deck = loadDeck();
 
@@ -239,9 +248,14 @@ export function renderDeckBuilder() {
     groups.get(t).push(card);
   }
   for (const [type, list] of groups) {
-    const section = document.createElement("section");
+    const section = document.createElement("details");
     section.className = "deck-type";
-    const h = document.createElement("h3");
+    section.open = !folded.has(type);
+    section.addEventListener("toggle", () => {
+      if (section.open) folded.delete(type); else folded.add(type);
+      saveFolded();
+    });
+    const h = document.createElement("summary");
     h.className = "deck-type-heading";
     const inType = list.reduce((s, c) => s + (current[String(c.id)] || 0), 0);
     h.textContent = `${(typeInfo[type] || {}).name || type}` + (inType ? ` · ${inType} in deck` : "");
