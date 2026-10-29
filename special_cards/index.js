@@ -22,6 +22,10 @@
 //                       is attached to a card
 //   onCardPlayed(api, a)  any card was just put into play by a.player
 //   onTurnEnd(api, a)     a.player is ending their turn
+//   targetsOpponentArea   true: the card is played by clicking anywhere on the
+//                         opponent's area instead of on one card (see skip-turn.js)
+//   canUseOnOpponent(api, o) / useOnOpponent(api, o)
+//                         o = { itemInst, opponent, opponentName, player }
 // "a" (attached) = { item, holder, holderOwner, player, played? } where item is
 // the attached special card, holder the card it is attached to, holderOwner
 // the player owning that card and player the player acting now.
@@ -29,9 +33,11 @@
 // opponent in online games): use it for counters and the like.
 
 import publishOrPerish from "./publish-or-perish.js";
+import skipTurn from "./skip-turn.js";
 
 const ALL = [
   publishOrPerish,
+  skipTurn,
 ];
 
 const byId = new Map(ALL.map(s => [norm(s.id), s]));
