@@ -545,3 +545,74 @@ $("reset").addEventListener("click", () => {
 });
 
 renderCollection();
+
+// ---- Physics logos orbiting the title ------------------------------------------
+// The logos of the physics types (not items / work force) move along an
+// ellipse around the page title: behind it on the upper half, in front of it
+// (and a bit larger) on the lower half. Still for visitors who asked their
+// system for reduced motion.
+const ORBIT_SECONDS = 28;   // time for one full turn
+
+function setupTitleOrbit() {
+  const header = document.querySelector("header");
+  const title = header && header.querySelector("h1");
+  if (!title) return;
+  const sources = Object.entries(typeInfo)
+    .filter(([key, info]) => key !== "item" && key !== "workforce" && info.logo)
+    .map(([, info]) => info.logo);
+  if (!sources.length) return;
+
+  const layer = document.createElement("div");
+  layer.className = "title-orbit";
+  layer.setAttribute("aria-hidden", "true");
+  let logos = sources.map(src => {
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = "";
+    img.onerror = () => { img.remove(); logos = logos.filter(l => l !== img); };
+    layer.append(img);
+    return img;
+  });
+  header.append(layer);
+  header.classList.add("has-orbit");
+
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let start = performance.now();
+
+  function frame(now) {
+    const h = header.getBoundingClientRect();
+    // size of the title text itself (the h1 element spans the whole width)
+    const range = document.createRange();
+    range.selectNodeContents(title);
+    const t = range.getBoundingClientRect();
+    if (t.width && logos.length) {
+      const cx = t.left - h.left + t.width / 2;
+      const cy = t.top - h.top + t.height / 2;
+      const size = Math.max(18, Math.min(48, t.height * 0.75));
+      const a = Math.min(t.width / 2 + size * 0.9,         // horizontal radius,
+        Math.min(cx, h.width - cx) - size * 0.6);          // kept inside the screen
+      const b = Math.min(t.height / 2 + size * 0.55,       // vertical radius, kept
+        Math.max(cy, h.height - cy) - size * 0.2);         // inside the header
+      const turn = still.matches ? 0 : ((now - start) / 1000) / ORBIT_SECONDS;
+      logos.forEach((img, i) => {
+        const angle = 2 * Math.PI * (turn + i / logos.length);
+        const depth = Math.sin(angle);                     // -1 back ... +1 front
+        const scale = 0.78 + 0.22 * (depth + 1) / 2;
+        const x = cx + a * Math.cos(angle) - size / 2;
+        const y = cy + b * depth - size / 2;
+        img.style.width = img.style.height = `${size}px`;
+        img.style.transform = `translate(${x}px, ${y}px) scale(${scale}) rotate(-90deg)`;
+        img.style.zIndex = depth > 0 ? "3" : "1";
+        img.style.opacity = String(0.55 + 0.45 * (depth + 1) / 2);
+      });
+    }
+    if (!still.matches) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  still.addEventListener?.("change", () => { start = performance.now(); requestAnimationFrame(frame); });
+  window.addEventListener("resize", () => { if (still.matches) requestAnimationFrame(frame); });
+  // The header changes size when switching tabs (compact header on Deck / Play).
+  new ResizeObserver(() => { if (still.matches) requestAnimationFrame(frame); }).observe(header);
+}
+
+setupTitleOrbit();

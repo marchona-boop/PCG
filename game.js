@@ -44,16 +44,18 @@
 //   can be played, or when you press "End game".
 // - Two-player games ("Play against someone online"): one player hosts and
 //   sends an invitation link, the other joins. Each plays from their own
-//   collection; players alternate turns for VERSUS_ROUNDS rounds and the
-//   highest total reach wins. Items can target cards on either side.
+//   collection; players alternate turns until a player starts a turn with an
+//   empty deck: that round is the last one (both players get a last turn),
+//   then the highest total reach wins. Cards can also be played on the
+//   opponent's board or bench (they then belong to the opponent). Items can target cards on either side.
 //   Connection: PeerJS (browser to browser; peerjs.min.js must sit next to
 //   index.html). Add ?local=1 to the address to test with two tabs instead.
 
 import { cards, typeInfo, collection, openCardInspection } from "./script.js";
 import { deckForGame, deckSummary, renderDeckBuilder } from "./deck.js?v=2026-10-28";
-import { specialFor } from "./special_cards/index.js?v=2026-10-28";
+import { specialFor } from "./special_cards/index.js?v=2026-10-29";
 
-const GAME_VERSION = "2026-10-28b";
+const GAME_VERSION = "2026-10-29b";
 
 // ---- Tunable settings -------------------------------------------------------
 const HAND_SIZE = 5;          // cards in hand at the start
@@ -67,7 +69,7 @@ const BUDGET_FIELD = "budget";
 const IMPROVE_BUDGET_FIELD = "improve budget";
 const WF_PLACEMENTS_PER_TURN = 1; // permanent work force cards placeable per turn
 const BEST_KEY = "my-gacha-best-score-v1";
-const VERSUS_ROUNDS = 10;     // rounds in a two-player game (each player plays once per round)
+const STACK_BONUS = 10;       // a stack of n cards gets +STACK_BONUS*(n-1) reach
 const PEER_PREFIX = "physics-card-game-";  // PeerJS ids are this + the room code
 // PeerJS 1.5.4 (MIT licence): local copy first, CDN as a fallback.
 const PEERJS_URLS = ["peerjs.min.js", "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"];
@@ -194,6 +196,11 @@ function states() {
 
 // The player who owns a card instance (the uid starts with the player's side).
 function ownerOf(inst) {
+  for (const st of states()) {
+    if (st.hand.includes(inst) || st.deck.includes(inst) || st.wfBoard.includes(inst) ||
+        st.stacks.some(stack => stack && stack.includes(inst))) return st;
+  }
+  // attached items: the player who played them
   return opp && String(inst.uid)[0] === opp.side ? opp : game;
 }
 
@@ -469,6 +476,10 @@ const specialApi = {
     const i = st.wfBoard.indexOf(inst);
     if (i !== -1) { st.wfBoard.splice(i, 1); st.destroyed++; }
   },
+  // The player st skips their next turn ("Skip turn" card).
+  skipTurn(st, itemInst) {
+    st.skip = { item: itemInst, pending: true };
+  },
   discardFromBoard(st, inst) {
     for (let slot = 0; slot < st.stacks.length; slot++) {
       const stack = st.stacks[slot];
@@ -513,6 +524,34 @@ function runSpecialHook(hook, extra) {
 }
 
 const cardPlayed = played => runSpecialHook("onCardPlayed", { player: game, played });
+
+// Special cards played on the opponent's whole area (e.g. "Skip turn").
+const isAreaItem = card => !!(specialFor(card) && specialFor(card).targetsOpponentArea);
+function canUseOnOpponent(card) {
+  const sp = specialFor(card);
+  if (!sp || !sp.targetsOpponentArea || !opp || !match || match.over) return false;
+  return typeof sp.canUseOnOpponent !== "function" ||
+    !!sp.canUseOnOpponent(specialApi, { item: card, opponent: opp, player: game });
+}
+
+function useOnOpponentArea() {
+  if (!game || game.over || !opp || !myTurn()) return;
+  const itemInst = selectedInst();
+  if (!itemInst || !isAreaItem(itemInst.card)) return;
+  const card = itemInst.card;
+  if (!canUseOnOpponent(card)) { setStatus(`${card.name} can't be used now.`); return; }
+  const plan = paymentPlan(costOf(card));
+  if (!plan) {
+    setStatus(`Not enough work force for ${card.name}: you are ${formatStat(shortfall(card))} short.`);
+    return;
+  }
+  applyPayment(plan);
+  game.hand = game.hand.filter(i => i.uid !== itemInst.uid);
+  let msg = specialFor(card).useOnOpponent(specialApi,
+    { itemInst, opponent: opp, opponentName: opponentName(), player: game }) || "";
+  if (plan.cost > 0) msg += ` (${describePayment(plan)})`;
+  endTurn(msg + cardPlayed(itemInst));
+}
 
 // ---- Rules ------------------------------------------------------------------
 function canPlaceOn(card, stack) {
@@ -590,13 +629,18 @@ function hasLegalAction(card) {
   if (isSingleUseWf(card)) return false;
   if (!canAfford(card)) return false;
   if (isPermanentWf(card)) return canPlaceWorkforce();
+  if (isAreaItem(card)) return canUseOnOpponent(card);
   if (isItem(card)) return itemTargets(card).length > 0 || (isBenchItem(card) && canPlaceWorkforce());
   if (isHybridWf(card) && canPlaceWorkforce()) return true;
-  return game.stacks.some(stack => canPlaceOn(card, stack));
+  return states().some(st => st.stacks.some(stack => canPlaceOn(card, stack)));
 }
 
+// Reach of a stack: its cards' reach + STACK_BONUS for each card above the first.
+function stackBonus(stack) {
+  return stack && stack.length > 1 ? STACK_BONUS * (stack.length - 1) : 0;
+}
 function stackReach(stack) {
-  return stack ? stack.reduce((sum, inst) => sum + boardReach(inst), 0) : 0;
+  return stack ? stack.reduce((sum, inst) => sum + boardReach(inst), 0) + stackBonus(stack) : 0;
 }
 
 function totalScore(st = game) {
@@ -608,12 +652,16 @@ function selectedInst() {
   return game && selected !== null ? game.hand[selected] : null;
 }
 
-function playTo(slot) {
+// Play the selected card on a slot of your board (side "me") or of the
+// opponent's board (side "opp": the card then belongs to the opponent).
+function playTo(slot, side = "me") {
   if (!game || game.over) return;
   const inst = selectedInst();
   if (!inst || !isPlayCard(inst.card)) return;
   const card = inst.card;
-  const stack = game.stacks[slot];
+  const st = side === "opp" && opp ? opp : game;
+  const where = st === game ? "" : ` on ${opponentName()}'s board`;
+  const stack = st.stacks[slot];
 
   const plan = paymentPlan(costOf(card));
   if (!plan) {
@@ -637,10 +685,10 @@ function playTo(slot) {
   inst.items = [];
   if (stack) {
     stack.push(inst);
-    message = `Stacked ${card.name} — combo of ${stack.length}, reach ${formatStat(stackReach(stack))}.`;
+    message = `Stacked ${card.name}${where} — combo of ${stack.length}, reach ${formatStat(stackReach(stack))}.`;
   } else {
-    game.stacks[slot] = [inst];
-    message = `Played ${card.name} on a new stack.`;
+    st.stacks[slot] = [inst];
+    message = `Played ${card.name} on a new stack${where}.`;
   }
   if (plan.cost > 0) message += ` (${describePayment(plan)})`;
   endTurn(message + cardPlayed(inst));
@@ -727,10 +775,11 @@ function useItem(where) {
   endTurn(message + cardPlayed(itemInst));
 }
 
-function placeWorkforce() {
+function placeWorkforce(side = "me") {
   if (!game || game.over) return;
   const inst = selectedInst();
   if (!inst || !canJoinBench(inst.card)) return;
+  const st = side === "opp" && opp ? opp : game;
 
   if (!canPlaceWorkforce()) {
     setStatus("You've already placed a work force card this turn.");
@@ -745,14 +794,15 @@ function placeWorkforce() {
   applyPayment(plan);
   game.hand = game.hand.filter(i => i.uid !== inst.uid);
   inst.items = [];
-  game.wfBoard.push(inst);
+  st.wfBoard.push(inst);
   game.wfPlaced++;
   selected = null;
 
   const wf = boardWorkforce(inst);
+  const whose = st === game ? "your" : `${opponentName()}'s`;
   let message = wf
-    ? `${inst.card.name} joined your work force (+${formatStat(wf)} every turn, starting now).`
-    : `${inst.card.name} was set up on the work force board.`;
+    ? `${inst.card.name} joined ${whose} work force (+${formatStat(wf)} every turn${st === game ? ", starting now" : ""}).`
+    : `${inst.card.name} was set up on ${st === game ? "the" : whose} work force board.`;
   message += cardPlayed(inst);
   message += resolveDestruction();
   if (plan.cost > 0) message += ` (${describePayment(plan)})`;
@@ -796,15 +846,21 @@ function endTurn(message) {
   game.turn++;
 
   if (match) {
-    // Two-player game: hand over to the opponent; a round ends after player 2.
-    if (match.turn === 1) match.round++;
-    match.turn = 1 - match.turn;
-    if (match.round > match.rounds) {
-      finishMatch(message);
-      return;
+    // End of my bonus turn: the "Skip turn" card on the opponent is discarded.
+    if (opp.skip && !opp.skip.pending) opp.skip = null;
+    if (advanceTurn()) { finishMatch(message); return; }
+    // The opponent has to skip this turn: it comes straight back to me.
+    if (opp.skip && opp.skip.pending) {
+      opp.skip.pending = false;
+      message += ` ${opponentName()} skips a turn.`;
+      if (advanceTurn()) { finishMatch(message); return; }
     }
     render();
-    setStatus(message + ` — ${opponentName()}'s turn.`);
+    if (myTurn()) {
+      setStatus(message + ` — bonus turn for you${isLastTurn() ? " (your last turn!)" : ""}.`);
+    } else {
+      setStatus(message + ` — ${opponentName()}'s ${isLastTurn() ? "last turn" : "turn"}.`);
+    }
     sendState(message);
     return;
   }
@@ -852,6 +908,20 @@ function resolveDestruction() {
   }
   return notes.length ? ` Effects: ${notes.join("; ")}.` : "";
 }
+
+// Two-player games: pass the turn to the other player. A round ends after the
+// second player. When a player starts a turn with an empty deck, the current
+// round becomes the last one. Returns true when the game is over.
+function advanceTurn() {
+  if (match.turn === 1) match.round++;
+  match.turn = 1 - match.turn;
+  if (match.lastRound && match.round > match.lastRound) return true;
+  const next = match.turn === match.me ? game : opp;
+  if (!match.lastRound && !next.deck.length) match.lastRound = match.round;
+  return false;
+}
+const isLastTurn = () => !!(match && match.lastRound && match.round === match.lastRound);
+const roundsPlayed = () => (match ? (match.lastRound || match.round) : 0);
 
 // End the game automatically when nothing more can happen.
 function checkStuck(lastMessage = "") {
@@ -979,13 +1049,35 @@ function render() {
   $("join-game").disabled = !!inMatch || netBusy;
 }
 
+// "Skip turn" card shown on top of the area of the player who skips.
+function renderSkip(zone, st) {
+  zone.querySelectorAll(":scope > .skip-overlay").forEach(el => el.remove());
+  if (!st || !st.skip) return;
+  const box = document.createElement("div");
+  box.className = "skip-overlay";
+  const img = document.createElement("img");
+  img.src = st.skip.item.card.image;
+  img.alt = st.skip.item.card.name;
+  img.title = `${st.skip.item.card.name} — click to inspect`;
+  img.addEventListener("click", e => { e.stopPropagation(); openCardInspection(st.skip.item.card); });
+  const label = document.createElement("span");
+  label.textContent = st.skip.pending ? "Skips the next turn" : "Turn skipped";
+  box.append(img, label);
+  zone.append(box);
+}
+
 function renderOpponent() {
+  renderSkip($("my-zone"), match ? game : null);
+  renderSkip($("opponent-zone"), match ? opp : null);
+  const sel = selectedInst();
+  const areaTarget = !!(sel && isAreaItem(sel.card) && canUseOnOpponent(sel.card) && canAfford(sel.card));
+  $("opponent-zone").classList.toggle("area-target", areaTarget);
   const zone = $("opponent-zone");
   zone.hidden = !match || !opp;
   $("hud-round-box").hidden = !match;
   $("hud-h-box").hidden = !match;
   $("hud-opp-h-box").hidden = !match;
-  $("hud-h").textContent = formatStat(hindex.value);
+  $("hud-h").textContent = String(myH());
   $("hud-opp-box").hidden = !match;
   $("hud-best-box").hidden = !!match;
   if (!match || !opp) {
@@ -996,18 +1088,21 @@ function renderOpponent() {
   renderBoard(opp, $("opp-board"), "opp");
   $("opp-title").textContent = opponentName();
   $("opp-summary").textContent =
-    (oppHIndex() === null ? "" : `h± ${formatStat(oppHIndex())} · `) +
+    (oppHIndex() === null ? "" : `h± ${oppHIndex()} · `) +
     `score ${formatStat(totalScore(opp))} · work force ${formatStat(boardWfTotal(opp))}` +
     ` · ${opp.hand.length} card(s) in hand · deck ${opp.deck.length}`;
-  $("hud-round").textContent = `${Math.min(match.round, match.rounds)}/${match.rounds}`;
+  $("hud-round").textContent = match.lastRound ? `${Math.min(match.round, match.lastRound)} · last` : `${match.round}`;
   const oh = oppHIndex();
-  $("hud-opp-h").textContent = oh === null ? "?" : formatStat(oh);
+  $("hud-opp-h").textContent = oh === null ? "?" : String(oh);
   $("hud-opp").textContent = formatStat(totalScore(opp));
   $("turn-banner").hidden = false;
   $("turn-banner").className = "turn-banner " + (match.over ? "over" : myTurn() ? "mine" : "theirs");
   $("turn-banner").textContent = match.over
     ? matchResultText()
-    : myTurn() ? "Your turn" : `${opponentName()}'s turn — waiting…`;
+    : myTurn()
+      ? (isLastTurn() ? "Your LAST turn!" : opp.skip && !opp.skip.pending ? "Your bonus turn" : "Your turn")
+      : `${opponentName()}'s ${isLastTurn() ? "last turn" : "turn"} — waiting…`;
+  $("turn-banner").classList.toggle("last", !match.over && isLastTurn());
 }
 
 function renderHud() {
@@ -1026,10 +1121,10 @@ function renderWorkforceBoard(st = game, zone = $("wf-board"), side = "me") {
   zone.className = "wf-board" + (side === "opp" ? " opp" : "");
 
   const inst = selectedInst();
-  const placing = side === "me" && inst && canJoinBench(inst.card);
+  const placing = !!(game && !game.over && inst && canJoinBench(inst.card));
   const ok = placing && canPlaceWorkforce() && canAfford(inst.card);
   if (placing) zone.classList.add(ok ? "valid-target" : "invalid-target");
-  const selItem = inst && isItem(inst.card) ? inst.card : null;
+  const selItem = inst && isItem(inst.card) && !isAreaItem(inst.card) ? inst.card : null;
   const affordable = selItem ? canAfford(selItem) : false;
 
   // Label in the middle of the bench (the cards cover it as the bench fills up).
@@ -1043,7 +1138,7 @@ function renderWorkforceBoard(st = game, zone = $("wf-board"), side = "me") {
     st.wfBoard.forEach((w, index) => {
       const el = makeGameCard(w.card);
       addBoardOverlays(el, w);
-      const benchItem = side === "me" && selItem && isBenchItem(selItem) && canUseItemOn(selItem, w) === false;
+      const benchItem = selItem && isBenchItem(selItem) && canUseItemOn(selItem, w) === false;
       if (benchItem) {
         // Setting up a bench item: clicking an existing bench card just places
         // it on the board (the click goes through to the work force zone).
@@ -1073,7 +1168,7 @@ function renderWorkforceBoard(st = game, zone = $("wf-board"), side = "me") {
   if (placing) {
     zone.tabIndex = 0;
     zone.setAttribute("role", "button");
-    zone.setAttribute("aria-label", `Place ${inst.card.name} on the work force board`);
+    zone.setAttribute("aria-label", `Place ${inst.card.name} on ${side === "opp" ? opponentName() + "'s" : "your"} work force board`);
   } else {
     zone.removeAttribute("role");
     zone.removeAttribute("tabindex");
@@ -1088,8 +1183,8 @@ function renderBoard(st = game, board = $("board"), side = "me") {
 
   const stacks = st ? st.stacks : Array(BOARD_SLOTS).fill(null);
   const inst = selectedInst();
-  const selCard = side === "me" && inst && isPlayCard(inst.card) ? inst.card : null;   // placing a card
-  const selItem = inst && isItem(inst.card) ? inst.card : null;       // targeting with an item
+  const selCard = inst && isPlayCard(inst.card) ? inst.card : null;   // placing a card (either board)
+  const selItem = inst && isItem(inst.card) && !isAreaItem(inst.card) ? inst.card : null;  // targeting with an item
   const affordable = inst ? canAfford(inst.card) : false;
 
   stacks.forEach((stack, slot) => {
@@ -1143,7 +1238,8 @@ function renderBoard(st = game, board = $("board"), side = "me") {
       info.append(r);
       if (stack.length > 1) {
         const t = document.createElement("span");
-        t.textContent = ` ×${stack.length}`;
+        t.textContent = ` ×${stack.length} (+${stackBonus(stack)})`;
+        t.title = `Stack bonus: +${STACK_BONUS} reach per card above the first`;
         info.append(t);
       }
       slotEl.append(pile, info);
@@ -1152,8 +1248,8 @@ function renderBoard(st = game, board = $("board"), side = "me") {
     if (selCard) {
       makeActivatable(
         slotEl,
-        `Play ${selCard.name} on slot ${slot + 1}${valid ? "" : " (not allowed)"}`,
-        () => playTo(slot)
+        `Play ${selCard.name} on ${side === "opp" ? opponentName() + "'s" : "your"} slot ${slot + 1}${valid ? "" : " (not allowed)"}`,
+        () => playTo(slot, side)
       );
     }
     board.append(slotEl);
@@ -1237,7 +1333,7 @@ function renderHand() {
   if (!game) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = "Press “New game” to deal a hand from your collection.";
+    empty.textContent = "Open “Solo game” and press “New game”, or play against someone online.";
     hand.append(empty);
     return;
   }
@@ -1272,7 +1368,10 @@ function renderHand() {
       : `${card.name}, ${typeName(card.type)}, cost ${formatStat(costOf(card))}, degree ${formatStat(degreeOf(card))}, reach ${formatStat(reachOf(card))}`;
 
     if (match && !myTurn()) {
+      // Not your turn: cards can still be inspected.
       el.classList.add("waiting");
+      makeActivatable(el, `Inspect ${card.name}`, () => openCardInspection(card));
+      el.title = "Click to inspect";
       hand.append(el);
       return;
     }
@@ -1299,7 +1398,7 @@ function hintFor(card) {
       : "You've already placed a work force card this turn.";
   }
   if (isHybridWf(card)) {
-    const board = game.stacks.some(stack => canPlaceOn(card, stack));
+    const board = states().some(st => st.stacks.some(stack => canPlaceOn(card, stack)));
     const bench = canPlaceWorkforce();
     if (board && bench) return "Choose a highlighted slot on the board, or click the work force board to recruit it as work force.";
     if (bench) return "No legal place on the board, but you can click the work force board to recruit it as work force.";
@@ -1313,6 +1412,12 @@ function hintFor(card) {
     if (bench) return "Click the work force board to set it up there.";
     if (targets) return "Click a highlighted card to use it on (you've already placed work force this turn).";
     return "You've already placed something on the work force board this turn.";
+  }
+  if (isAreaItem(card)) {
+    if (!match || !opp) return "This card can only be played against an opponent (online game).";
+    return canUseOnOpponent(card)
+      ? `Click anywhere on ${opponentName()}'s area to play it.`
+      : "It can't be played right now.";
   }
   if (isItem(card)) {
     if (hasLegalAction(card)) return "Click a highlighted card on the board to use this item on it.";
@@ -1384,62 +1489,90 @@ let net = null;        // { send(msg), close() } once connected
 let netBusy = false;   // connecting
 
 // ---- h± index: personal ranking, saved in this browser ----
-// Starts at 0; after every online game played to the end, the score difference
-// with the opponent is added (win 20-10: +10, loss 160-200: -40).
-const HINDEX_KEY = "my-gacha-hindex-v1";
+// h± = the largest number h such that you have won at least h online games by
+// a margin of at least H_STEP*h points. Example (H_STEP = 10): wins by 100, 2,
+// 10, 20, 20 -> h± = 2 (two wins by >= 20); to reach 3 you need three wins by
+// >= 30, i.e. two more. Only games played to the end count.
+const H_STEP = 10;
+const HINDEX_KEY = "my-gacha-hindex-v2";
 function loadHIndex() {
   try {
     const o = JSON.parse(localStorage.getItem(HINDEX_KEY) || "{}");
     return {
-      value: Number.isFinite(o.value) ? o.value : 0,
+      wins: Array.isArray(o.wins) ? o.wins.filter(Number.isFinite) : [],   // winning margins
       games: Number.isSafeInteger(o.games) ? o.games : 0,
+      // losses were not counted before: older games without a win count as losses
+      losses: Number.isSafeInteger(o.losses) ? o.losses
+        : Math.max(0, (Number.isSafeInteger(o.games) ? o.games : 0) - (Array.isArray(o.wins) ? o.wins.length : 0)),
       recorded: Array.isArray(o.recorded) ? o.recorded.slice(-50) : []
     };
   } catch {
-    return { value: 0, games: 0, recorded: [] };
+    return { wins: [], games: 0, losses: 0, recorded: [] };
   }
 }
 let hindex = loadHIndex();
 function saveHIndex() {
   try { localStorage.setItem(HINDEX_KEY, JSON.stringify(hindex)); } catch { /* ignore */ }
 }
-const signed = n => (n > 0 ? "+" : n < 0 ? "−" : "") + formatStat(Math.abs(n));
 
-// Add the result of the finished match to your h± index (once per match).
+// h± of a list of winning margins.
+function hOf(wins) {
+  const sorted = [...wins].filter(m => m > 0).sort((a, b) => b - a);
+  let h = 0;
+  while (h < sorted.length && sorted[h] >= H_STEP * (h + 1)) h++;
+  return h;
+}
+const myH = () => hOf(hindex.wins);
+
+// What is needed to reach h+1.
+function nextHText(wins) {
+  const h = hOf(wins), need = H_STEP * (h + 1);
+  const have = wins.filter(m => m >= need).length;
+  const missing = h + 1 - have;
+  return `${missing} more win${missing > 1 ? "s" : ""} by ≥ ${need} for h± = ${h + 1}`;
+}
+
+// Add the result of the finished match to your record (once per match).
 // Returns a short message, or "" if nothing changed.
 function recordMatch() {
   if (!match || !match.over || !opp || !match.id) return "";
   if (match.resigned !== undefined && match.resigned !== null) return ""; // abandoned games don't count
   if (hindex.recorded.includes(match.id)) return "";
-  const delta = totalScore() - totalScore(opp);
-  if (!Number.isFinite(delta)) return "";
-  const before = hindex.value;
-  hindex.value += delta;
+  const margin = totalScore() - totalScore(opp);
+  if (!Number.isFinite(margin)) return "";
+  const before = myH();
+  if (margin > 0) hindex.wins.push(margin);
   hindex.games++;
+  if (margin < 0) hindex.losses++;
   hindex.recorded = [...hindex.recorded, match.id].slice(-50);
   saveHIndex();
   renderHIndex();
-  return ` Your h± index: ${formatStat(before)} → ${formatStat(hindex.value)} (${signed(delta)}).`;
+  const after = myH();
+  return after !== before
+    ? ` Your h± index: ${before} → ${after}!`
+    : ` Your h± index: ${after} (${nextHText(hindex.wins)}).`;
 }
 
-// The opponent's h± index (as it was at the start, updated with this game's
-// result once the game is over).
+// The opponent's h± index (updated with this game's result once it is over).
 function oppHIndex() {
-  if (!match || !match.h) return null;
-  let v = match.h[1 - match.me];
-  if (!Number.isFinite(v)) return null;
+  if (!match || !match.hw) return null;
+  const wins = [...(match.hw[1 - match.me] || [])];
   if (match.over && (match.resigned === undefined || match.resigned === null)) {
-    const d = totalScore(opp) - totalScore();
-    if (Number.isFinite(d)) v += d;
+    const m = totalScore(opp) - totalScore();
+    if (Number.isFinite(m) && m > 0) wins.push(m);
   }
-  return v;
+  return hOf(wins);
 }
 
 function renderHIndex() {
-  $("my-hindex").textContent = formatStat(hindex.value);
+  $("my-hindex").textContent = String(myH());
+  $("stat-games").textContent = String(hindex.games);
+  $("stat-wins").textContent = String(hindex.wins.length);
+  $("stat-losses").textContent = String(hindex.losses);
+  const draws = hindex.games - hindex.wins.length - hindex.losses;
   $("my-hindex-games").textContent = hindex.games
-    ? `${hindex.games} online game${hindex.games > 1 ? "s" : ""}`
-    : "no online game yet";
+    ? (draws > 0 ? `${draws} draw${draws > 1 ? "s" : ""} · ` : "") + `next: ${nextHText(hindex.wins)}`
+    : "Online games played to the end count for your h± index.";
 }
 
 const myTurn = () => !match || match.turn === match.me;
@@ -1469,7 +1602,7 @@ function finishMatch(message = "", { send = true } = {}) {
   selected = null;
   const h = recordMatch();
   render();
-  setStatus(`${message} ${match.resigned != null ? "" : match.rounds + " rounds played — "}${matchResultText()}${h}`.trim());
+  setStatus(`${message} ${match.resigned != null ? "" : roundsPlayed() + " rounds played — "}${matchResultText()}${h}`.trim());
   if (send) sendState(message);
 }
 
@@ -1487,7 +1620,7 @@ function newPlayerState(side, deckIds) {
     side, deck, hand: deck.splice(0, HAND_SIZE),
     stacks: Array(BOARD_SLOTS).fill(null), wfBoard: [],
     wfSpent: 0, wfPlaced: 0, turn: 1, discarded: 0, consumed: 0,
-    destroyed: 0, itemsUsed: 0, over: false, lastDrawn: null
+    destroyed: 0, itemsUsed: 0, over: false, lastDrawn: null, skip: null
   };
 }
 
@@ -1516,7 +1649,8 @@ function serPlayer(st) {
     wfBoard: st.wfBoard.map(serInst),
     wfSpent: st.wfSpent, wfPlaced: st.wfPlaced, turn: st.turn, discarded: st.discarded,
     consumed: st.consumed, destroyed: st.destroyed, itemsUsed: st.itemsUsed,
-    over: st.over, lastDrawn: st.lastDrawn
+    over: st.over, lastDrawn: st.lastDrawn,
+    skip: st.skip ? { item: serInst(st.skip.item), pending: !!st.skip.pending } : null
   };
 }
 
@@ -1525,7 +1659,8 @@ function dePlayer(o) {
     ...o,
     deck: o.deck.map(deInst), hand: o.hand.map(deInst),
     stacks: o.stacks.map(stack => (stack ? stack.map(deInst) : null)),
-    wfBoard: o.wfBoard.map(deInst)
+    wfBoard: o.wfBoard.map(deInst),
+    skip: o.skip ? { item: deInst(o.skip.item), pending: !!o.skip.pending } : null
   };
 }
 
@@ -1549,9 +1684,9 @@ function receiveState(msg) {
   render();
   const what = msg.log ? `${opponentName()}: ${opponentView(msg.log)}` : "";
   if (match.over) {
-    setStatus(`${what} ${match.resigned != null ? "" : match.rounds + " rounds played — "}${matchResultText()}${h}`.trim());
+    setStatus(`${what} ${match.resigned != null ? "" : roundsPlayed() + " rounds played — "}${matchResultText()}${h}`.trim());
   } else if (myTurn() && !wasMyTurn) {
-    setStatus(`${what} — your turn (round ${match.round}/${match.rounds}).`.replace(/^ — /, ""));
+    setStatus(`${what} — ${isLastTurn() ? "your LAST turn" : "your turn"} (round ${match.round}).`.replace(/^ — /, ""));
   } else if (what) {
     setStatus(what);
   }
@@ -1577,9 +1712,9 @@ function onNetMessage(msg) {
       // Host: the guest sent their name and deck -> set up the game.
       match = {
         id: randomCode() + Date.now().toString(36),
-        me: 0, turn: 0, round: 1, rounds: VERSUS_ROUNDS, over: false, resigned: null,
+        me: 0, turn: 0, round: 1, lastRound: null, over: false, resigned: null,
         names: [$("player-name").value.trim() || "Host", String(msg.name || "Guest").slice(0, 24)],
-        h: [hindex.value, Number.isFinite(msg.h) ? msg.h : 0]
+        hw: [hindex.wins, Array.isArray(msg.wins) ? msg.wins.filter(Number.isFinite).slice(-500) : []]
       };
       game = newPlayerState("a", deckIdsFromCollection());
       opp = newPlayerState("b", Array.isArray(msg.deck) ? msg.deck : []);
@@ -1588,7 +1723,7 @@ function onNetMessage(msg) {
       $("versus-panel").open = false;
       showView("play-view");
       render();
-      setStatus(`Game on! ${VERSUS_ROUNDS} rounds — you start.`);
+      setStatus("Game on! The game ends after the round in which a player runs out of cards to draw — you start.");
       sendState("");
     } else if (msg.t === "state") {
       if (!match) { setNet("Connected."); $("versus-panel").open = false; }
@@ -1718,7 +1853,7 @@ async function joinGame(code) {
   mySide = "b";
   netBusy = true;
   render();
-  const hello = { t: "hello", name: $("player-name").value.trim() || "Guest", deck, h: hindex.value };
+  const hello = { t: "hello", name: $("player-name").value.trim() || "Guest", deck, wins: hindex.wins };
 
   if (useLocalTransport) {
     net = localTransport(code);
@@ -1777,6 +1912,7 @@ $("new-game").addEventListener("click", () => {
   mySide = "s";
   $("versus-panel").open = false;
   newGame();
+  $("solo-panel").open = false;
 });
 $("end-game").addEventListener("click", () => finishGame());
 $("host-game").addEventListener("click", hostGame);
@@ -1831,6 +1967,14 @@ $("pass-turn").addEventListener("click", passTurn);
 $("wf-board").addEventListener("click", () => {
   const inst = selectedInst();
   if (inst && canJoinBench(inst.card)) placeWorkforce();
+});
+$("opponent-zone").addEventListener("click", () => {
+  const inst = selectedInst();
+  if (inst && isAreaItem(inst.card)) useOnOpponentArea();
+});
+$("opp-wf-board").addEventListener("click", () => {
+  const inst = selectedInst();
+  if (inst && canJoinBench(inst.card)) placeWorkforce("opp");
 });
 $("wf-board").addEventListener("keydown", event => {
   const inst = selectedInst();

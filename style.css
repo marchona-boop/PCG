@@ -1445,24 +1445,9 @@ details.deck-type > summary:hover { filter: brightness(1.2); }
 details.deck-type:not([open]) > summary { margin-bottom: 0; }
 
 
-/* ===================== Opponent facing you =====================
-   Their board is above their bench and both are turned upside down (as if
-   seen from across the table). Numbers and labels are turned back so that
-   they stay readable. */
-.opponent-zone .board,
-.opponent-zone .wf-board {
-  transform: rotate(180deg);
-}
+/* ===================== Opponent's side =====================
+   Their board is above their bench (as if facing you); cards are upright. */
 .opponent-zone .wf-board { margin: 8px 0 0; }
-.opponent-zone .stack-info,
-.opponent-zone .gc-attached,
-.opponent-zone .wf-board .wf-empty,
-.opponent-zone .slot.empty-slot > span {
-  transform: rotate(180deg);
-}
-/* Hover lifts the card towards the opponent's side (down on your screen). */
-.opponent-zone .board .stack > .game-card:hover,
-.opponent-zone .wf-board .game-card:hover { transform: translateY(-2px); }
 
 
 /* ===================== h± index ===================== */
@@ -1531,3 +1516,119 @@ details.deck-type:not([open]) > summary { margin-bottom: 0; }
 }
 /* When logos are shown they replace the big "?" */
 .card.mystery.has-logos::after { content: none; }
+
+
+/* ===================== Skip turn / last turn ===================== */
+.player-zone { position: relative; }
+.opponent-zone.area-target {
+  cursor: pointer;
+  outline: 2px dashed #f0a6be;
+  outline-offset: 2px;
+  box-shadow: 0 0 26px #f0a6be44;
+  animation: areaPulse 1.4s ease-in-out infinite;
+}
+@keyframes areaPulse { 50% { box-shadow: 0 0 40px #f0a6be77; } }
+
+.skip-overlay {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 5px;
+  background: #170f1aee;
+  border: 1px solid #f0a6be;
+  border-radius: 10px;
+  box-shadow: 0 8px 22px #000b;
+  transform: rotate(-4deg);
+}
+.skip-overlay img {
+  width: 64px;
+  aspect-ratio: 2 / 3;
+  object-fit: contain;
+  border-radius: 6px;
+  cursor: zoom-in;
+}
+.skip-overlay span { font-size: 0.68rem; font-weight: 750; color: #ffb3c0; white-space: nowrap; }
+
+.turn-banner.last { background: #5a1a22; color: #ffd0d6; animation: lastPulse 1.6s ease-in-out infinite; }
+@keyframes lastPulse { 50% { box-shadow: 0 0 18px #ff8a9a66; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .opponent-zone.area-target, .turn-banner.last { animation: none; }
+}
+
+
+/* ===================== Player profile & solo panel ===================== */
+.player-card {
+  max-width: 820px;
+  margin: 4px auto 8px;
+  padding: 8px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 14px;
+  background: linear-gradient(135deg, #14243d, #0f1a2c);
+  border: 1px solid #30425d;
+  border-radius: 14px;
+}
+.player-name-box input {
+  width: 12em;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #3b4967;
+  background: #0b1322;
+  color: var(--text);
+  font: inherit;
+  font-weight: 750;
+  font-size: 1.05rem;
+}
+.player-stat { text-align: center; min-width: 56px; }
+.player-stat span {
+  display: block;
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.player-stat strong { font-size: 1.2rem; color: var(--accent); }
+.player-stat.hstat span { text-transform: none; letter-spacing: 0.02em; white-space: nowrap; }
+.player-stat.hstat span.pm { display: inline-flex; font-size: 0.85em; }
+.player-stat.hstat strong { color: #ffe2a3; }
+.player-stat.win strong { color: #a7f3c4; }
+.player-stat.loss strong { color: #ffb3c0; }
+.player-next { flex-basis: 100%; margin: 0; text-align: center; font-size: 0.78rem; color: var(--muted); }
+
+.solo-panel {
+  max-width: 820px;
+  margin: 8px auto;
+  padding: 8px 14px;
+  background: #0f1a2c;
+  border: 1px solid #30425d;
+  border-radius: 12px;
+}
+.solo-panel summary { cursor: pointer; font-weight: 700; color: var(--accent); }
+.solo-panel .game-controls { margin: 8px 0 2px; }
+
+
+/* ===================== Logos orbiting the title ===================== */
+header.has-orbit h1 { position: relative; z-index: 2; }
+header.has-orbit p { position: relative; z-index: 2; }
+.title-orbit {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.title-orbit img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px #72e0f588);
+  will-change: transform;
+}
+body.playing header.has-orbit { padding: 16px 16px 14px; }

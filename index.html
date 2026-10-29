@@ -78,6 +78,19 @@
 
   <section id="play-view" aria-labelledby="play-title" hidden>
     <h2 id="play-title" class="visually-hidden">Play</h2>
+    <div class="player-card" aria-label="Your player profile">
+      <label class="player-name-box" title="Your name, shown to your online opponents">
+        <span class="visually-hidden">Your name</span>
+        <input id="player-name" type="text" maxlength="24" placeholder="Your name">
+      </label>
+      <div class="player-stat hstat" title="Largest h such that you won at least h online games by at least 10×h points.">
+        <span>h<span class="pm"><sup>+</sup><sub>−</sub></span> index</span><strong id="my-hindex">0</strong>
+      </div>
+      <div class="player-stat"><span>Games</span><strong id="stat-games">0</strong></div>
+      <div class="player-stat win"><span>Wins</span><strong id="stat-wins">0</strong></div>
+      <div class="player-stat loss"><span>Losses</span><strong id="stat-losses">0</strong></div>
+      <p id="my-hindex-games" class="player-next"></p>
+    </div>
     <details class="rules-panel">
       <summary>Rules</summary>
       <p class="play-intro">
@@ -96,16 +109,12 @@
         Finally, physics cards can be played directly on the player's board (if the player possesses enough workforce) but also on top of another, already placed physics card. For one physics card to be allowed to be stacked on top of another, they must shard a common branch, represented by the logos on their left strip, and the top card must have a stricly lower degree stat, indicated on the top left corner. Piling cards on top of another triggers bonuses when certain cards share the same stack and enables to save space on the board for other physic cards. However, when a physics card is discarded, due to its robustness dropping to 0, all the cards that are stacked onto it are also destroyed. One shall therefore try to put their most robust cards at the bottom of a stack. Note also that once a card is played, it cannot be moved anymore, except if it is destroy. One should thus be careful when playing cards with a low degree or a weak robustness directly on the board.
       </p>
       <p class="play-intro">
-        A game unfolds as follows: each player starts with a hand of 5 cards. At each turn, a player can put a permanent workforce on the workforce bench and play another card (either a physics card or an itam & event card) or draw a card. After 10 turns, the game ends and the player with the highest total reach score wins.
+        A game unfolds as follows: each player starts with a hand of 5 cards. At each turn, a player can put a permanent workforce on the workforce bench and play another card (either a physics card or an itam & event card) or draw a card. The game goes on until a player starts their turn with no card left to draw: that round is the last one (both players get a last turn), then the player with the highest total reach score wins.
       </p>
     </details>
 
     <details class="versus-panel" id="versus-panel">
       <summary>Play against someone online</summary>
-      <div class="versus-row">
-        <label>Your name <input id="player-name" type="text" maxlength="24" placeholder="e.g. Marie"></label>
-        <span class="hindex-line" title="Starts at 0; after every online game played to the end, the score difference with your opponent is added.">Your h<span class="pm"><sup>+</sup><sub>−</sub></span> index: <strong id="my-hindex">0</strong> <small id="my-hindex-games"></small></span>
-      </div>
       <div class="versus-row">
         <button id="host-game" type="button" class="secondary">Host an online game</button>
         <span class="versus-or">or join with a code</span>
@@ -121,10 +130,13 @@
       <p id="net-status" class="net-status" role="status" aria-live="polite"></p>
     </details>
 
-    <div class="controls game-controls">
-      <button id="new-game" type="button">New game</button>
-      <button id="end-game" type="button" class="secondary" disabled>End game</button>
-    </div>
+    <details class="solo-panel" id="solo-panel">
+      <summary>Solo game</summary>
+      <div class="controls game-controls">
+        <button id="new-game" type="button">New game</button>
+        <button id="end-game" type="button" class="secondary" disabled>End game</button>
+      </div>
+    </details>
     <p class="deck-line"><span id="deck-line-text"></span> · <a href="#deck" id="deck-edit-link">edit deck</a></p>
 
     <div class="game-hud" aria-live="polite">
@@ -210,7 +222,7 @@
 
 <script type="module" src="script.js"></script>
 <script type="module" src="deck.js?v=2026-10-28"></script>
-<script type="module" src="game.js?v=2026-10-28b"></script>
+<script type="module" src="game.js?v=2026-10-29b"></script>
 
 </body>
 </html>

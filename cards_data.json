@@ -631,7 +631,8 @@
     "rarity": "Common",
     "weight": 50,
     "image": "cards/phys_card_game-figure54.png",
-    "description": "your opponent skips a turn" },
+    "description": "your opponent skips a turn",
+    "special": "skip_turn" },
 
   { "id": "056",
     "name": "publish or perish",
