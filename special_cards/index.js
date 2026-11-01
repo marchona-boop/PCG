@@ -26,6 +26,13 @@
 //                         opponent's area instead of on one card (see skip-turn.js)
 //   canUseOnOpponent(api, o) / useOnOpponent(api, o)
 //                         o = { itemInst, opponent, opponentName, player }
+//   playAlone             true: played with the "Play" button, no target, and
+//                         the turn goes on (see draw3cards.js)
+//   canPlay(api, o) / play(api, o)   o = { itemInst, player }
+//   onPlay(api, o)        the card itself was just put on a board or bench;
+//                         o = { inst, player, owner } (see spy.js)
+//   revealsHandTo(api, o) while on the board, does this card show the hand of
+//                         its owner to o.viewer? (see spy.js)
 // "a" (attached) = { item, holder, holderOwner, player, played? } where item is
 // the attached special card, holder the card it is attached to, holderOwner
 // the player owning that card and player the player acting now.
@@ -34,10 +41,14 @@
 
 import publishOrPerish from "./publish-or-perish.js";
 import skipTurn from "./skip-turn.js";
+import draw3cards from "./draw3cards.js";
+import spy from "./spy.js";
 
 const ALL = [
   publishOrPerish,
   skipTurn,
+  draw3cards,
+  spy,
 ];
 
 const byId = new Map(ALL.map(s => [norm(s.id), s]));
