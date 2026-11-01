@@ -1632,3 +1632,21 @@ header.has-orbit p { position: relative; z-index: 2; }
   will-change: transform;
 }
 body.playing header.has-orbit { padding: 16px 16px 14px; }
+
+
+/* ===================== Spied opponent hand / Play button ===================== */
+.opp-hand { margin: 0 0 8px; }
+.opp-hand[hidden] { display: none; }
+.opp-hand-label {
+  margin: 0 0 4px;
+  text-align: center;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f0a6be;
+}
+.opp-hand-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.opp-hand .game-card { --w: 78px; cursor: zoom-in; }
+.opp-hand .game-card .gc-foot { display: none; }
+.opp-hand .game-card .gc-head { font-size: 0.62rem; height: 18px; }
+#sel-play[hidden] { display: none; }

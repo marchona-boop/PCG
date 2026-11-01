@@ -53,9 +53,9 @@
 
 import { cards, typeInfo, collection, openCardInspection } from "./script.js";
 import { deckForGame, deckSummary, renderDeckBuilder } from "./deck.js?v=2026-10-28";
-import { specialFor } from "./special_cards/index.js?v=2026-10-29";
+import { specialFor } from "./special_cards/index.js?v=2026-10-31";
 
-const GAME_VERSION = "2026-10-29b";
+const GAME_VERSION = "2026-10-31b";
 
 // ---- Tunable settings -------------------------------------------------------
 const HAND_SIZE = 5;          // cards in hand at the start
@@ -476,6 +476,12 @@ const specialApi = {
     const i = st.wfBoard.indexOf(inst);
     if (i !== -1) { st.wfBoard.splice(i, 1); st.destroyed++; }
   },
+  // Draw up to n cards from st's deck into their hand; returns the cards drawn.
+  draw(st, n) {
+    const drawn = st.deck.splice(0, Math.max(0, n));
+    st.hand.push(...drawn);
+    return drawn;
+  },
   // The player st skips their next turn ("Skip turn" card).
   skipTurn(st, itemInst) {
     st.skip = { item: itemInst, pending: true };
@@ -524,6 +530,56 @@ function runSpecialHook(hook, extra) {
 }
 
 const cardPlayed = played => runSpecialHook("onCardPlayed", { player: game, played });
+
+// The card itself has just been put on a board or bench (e.g. "Spy").
+function specialOnPlay(inst, owner) {
+  const sp = specialFor(inst.base || inst.card);
+  if (sp && typeof sp.onPlay === "function") {
+    try { sp.onPlay(specialApi, { inst, player: game, owner }); } catch (err) { console.error(err); }
+  }
+}
+
+// Can `viewer` see the hand of `target`? (a "Spy" card on target's side)
+function handRevealed(target, viewer) {
+  if (!target || !viewer || target === viewer) return false;
+  const onSide = [...target.stacks.flatMap(st => st || []), ...target.wfBoard];
+  return onSide.some(inst => {
+    const sp = specialFor(inst.base || inst.card);
+    return sp && typeof sp.revealsHandTo === "function" &&
+      sp.revealsHandTo(specialApi, { inst, owner: target, viewer });
+  });
+}
+
+// Special cards played on their own with the "Play" button (e.g. "Draw 3 cards").
+const isPlayAlone = card => !!(specialFor(card) && specialFor(card).playAlone);
+function canPlayAlone(card) {
+  const sp = specialFor(card);
+  if (!sp || !sp.playAlone || !game || game.over || !myTurn()) return false;
+  return typeof sp.canPlay !== "function" || !!sp.canPlay(specialApi, { item: card, player: game });
+}
+
+function playAloneSelected() {
+  const itemInst = selectedInst();
+  if (!itemInst || !isPlayAlone(itemInst.card)) return;
+  const card = itemInst.card;
+  if (!canPlayAlone(card)) { setStatus(`${card.name} can't be played right now.`); return; }
+  const plan = paymentPlan(costOf(card));
+  if (!plan) {
+    setStatus(`Not enough work force for ${card.name}: you are ${formatStat(shortfall(card))} short.`);
+    return;
+  }
+  applyPayment(plan);
+  game.hand = game.hand.filter(i => i.uid !== itemInst.uid);
+  selected = null;
+  let msg = specialFor(card).play(specialApi, { itemInst, player: game }) || "";
+  if (plan.cost > 0) msg += ` (${describePayment(plan)})`;
+  msg += cardPlayed(itemInst);
+  msg += resolveDestruction();
+  render();
+  setStatus(msg + " Your turn goes on.");
+  if (match) sendState(msg.replace(/you drew [^.]*\./, `${match.names[match.me]} drew some cards.`));
+  checkStuck();
+}
 
 // Special cards played on the opponent's whole area (e.g. "Skip turn").
 const isAreaItem = card => !!(specialFor(card) && specialFor(card).targetsOpponentArea);
@@ -629,6 +685,7 @@ function hasLegalAction(card) {
   if (isSingleUseWf(card)) return false;
   if (!canAfford(card)) return false;
   if (isPermanentWf(card)) return canPlaceWorkforce();
+  if (isPlayAlone(card)) return canPlayAlone(card);
   if (isAreaItem(card)) return canUseOnOpponent(card);
   if (isItem(card)) return itemTargets(card).length > 0 || (isBenchItem(card) && canPlaceWorkforce());
   if (isHybridWf(card) && canPlaceWorkforce()) return true;
@@ -683,6 +740,7 @@ function playTo(slot, side = "me") {
 
   let message;
   inst.items = [];
+  specialOnPlay(inst, st);
   if (stack) {
     stack.push(inst);
     message = `Stacked ${card.name}${where} — combo of ${stack.length}, reach ${formatStat(stackReach(stack))}.`;
@@ -794,6 +852,7 @@ function placeWorkforce(side = "me") {
   applyPayment(plan);
   game.hand = game.hand.filter(i => i.uid !== inst.uid);
   inst.items = [];
+  specialOnPlay(inst, st);
   st.wfBoard.push(inst);
   game.wfPlaced++;
   selected = null;
@@ -1066,7 +1125,33 @@ function renderSkip(zone, st) {
   zone.append(box);
 }
 
+// The opponent's hand, shown face up while you have a "Spy" on their side.
+function renderOpponentHand() {
+  const box = $("opp-hand");
+  box.replaceChildren();
+  const visible = !!(match && opp && handRevealed(opp, game));
+  box.hidden = !visible;
+  if (!visible) return;
+  const label = document.createElement("p");
+  label.className = "opp-hand-label";
+  label.textContent = `${opponentName()}'s hand (spied)`;
+  box.append(label);
+  const row = document.createElement("div");
+  row.className = "opp-hand-row";
+  for (const inst of opp.hand) {
+    const el = makeGameCard(inst.card);
+    el.classList.add("spied");
+    makeActivatable(el, `Inspect ${inst.card.name}`, event => {
+      event.stopPropagation();
+      openCardInspection(inst.card);
+    });
+    row.append(el);
+  }
+  box.append(row);
+}
+
 function renderOpponent() {
+  renderOpponentHand();
   renderSkip($("my-zone"), match ? game : null);
   renderSkip($("opponent-zone"), match ? opp : null);
   const sel = selectedInst();
@@ -1386,6 +1471,10 @@ function renderHand() {
 }
 
 function hintFor(card) {
+  if (card.special && !specialFor(card)) {
+    return `This card has "special": "${card.special}", but no special card with that name is loaded. ` +
+      "Check the spelling, and that its file is in the special_cards folder and listed in special_cards/index.js.";
+  }
   if (isSingleUseWf(card)) {
     return "Single-use work force is spent automatically when you play a card. You can also discard it.";
   }
@@ -1412,6 +1501,9 @@ function hintFor(card) {
     if (bench) return "Click the work force board to set it up there.";
     if (targets) return "Click a highlighted card to use it on (you've already placed work force this turn).";
     return "You've already placed something on the work force board this turn.";
+  }
+  if (isPlayAlone(card)) {
+    return canPlayAlone(card) ? "Press “Play” to use it." : "It can't be played right now.";
   }
   if (isAreaItem(card)) {
     if (!match || !opp) return "This card can only be played against an opponent (online game).";
@@ -1478,6 +1570,10 @@ function renderSelectionBar() {
   }
   const eff = describeEffects(inst.base);
   if (eff) text += ` · effect${card.effectActive ? " (active)" : ""}: ${eff}`;
+  const spc = specialFor(card);
+  if (spc && typeof spc.describe === "function" && !isItem(card)) text += ` · ${spc.describe(card)}`;
+  $("sel-play").hidden = !isPlayAlone(card);
+  $("sel-play").disabled = !(canPlayAlone(card) && canAfford(card));
   $("selection-text").textContent = text;
 }
 
@@ -1990,6 +2086,7 @@ $("sel-cancel").addEventListener("click", () => {
   setStatus("Pick a card from your hand.");
 });
 $("sel-discard").addEventListener("click", discardSelected);
+$("sel-play").addEventListener("click", playAloneSelected);
 $("sel-inspect").addEventListener("click", () => {
   const inst = selectedInst();
   if (inst) openCardInspection(inst.card);

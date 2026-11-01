@@ -154,6 +154,7 @@
 
     <section id="opponent-zone" class="player-zone opponent-zone" hidden aria-label="Opponent">
       <h3 class="zone-title opp-title"><span id="opp-title">Opponent</span> <small id="opp-summary"></small></h3>
+      <div id="opp-hand" class="opp-hand" hidden></div>
       <div id="opp-board" class="board opp"></div>
       <div id="opp-wf-board" class="wf-board opp"></div>
     </section>
@@ -169,6 +170,7 @@
           <div id="selection-bar" class="selection-bar" hidden>
             <span id="selection-text"></span>
             <div class="selection-buttons">
+              <button type="button" id="sel-play" hidden>Play</button>
               <button type="button" id="sel-inspect" class="secondary">Inspect</button>
               <button type="button" id="sel-discard" class="secondary">Discard</button>
               <button type="button" id="sel-cancel" class="secondary">Cancel</button>
@@ -222,7 +224,7 @@
 
 <script type="module" src="script.js"></script>
 <script type="module" src="deck.js?v=2026-10-28"></script>
-<script type="module" src="game.js?v=2026-10-29b"></script>
+<script type="module" src="game.js?v=2026-10-31"></script>
 
 </body>
 </html>
